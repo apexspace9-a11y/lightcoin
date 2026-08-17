@@ -183,7 +183,9 @@ class HomePage extends StatelessWidget {
 
     final saved = store.totalSaved;
     final target = store.totalTarget;
-    final progress = target <= 0 ? 0.0 : (saved / target).clamp(0.0, 1.0);
+    final progress = target <= 0
+        ? 0.0
+        : (saved / target).clamp(0.0, 1.0).toDouble();
 
     return PageFrame(
       title: 'Light Coin',
