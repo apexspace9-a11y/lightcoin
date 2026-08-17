@@ -42,7 +42,7 @@ class NotificationService {
       _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
 
-  Future<bool> areNotificationsEnabled() async {
+  Future<bool> _appNotificationsEnabled() async {
     try {
       await init();
       return await _android?.areNotificationsEnabled() ?? true;
@@ -51,10 +51,12 @@ class NotificationService {
     }
   }
 
+  Future<bool> areNotificationsEnabled() => isReminderChannelEnabled();
+
   Future<bool> isReminderChannelEnabled() async {
     try {
       await init();
-      if (!await areNotificationsEnabled()) return false;
+      if (!await _appNotificationsEnabled()) return false;
 
       final android = _android;
       if (android == null) return true;
