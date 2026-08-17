@@ -51,6 +51,27 @@ class NotificationService {
     }
   }
 
+  Future<bool> isReminderChannelEnabled() async {
+    try {
+      await init();
+      if (!await areNotificationsEnabled()) return false;
+
+      final android = _android;
+      if (android == null) return true;
+      final channels = await android.getNotificationChannels();
+      if (channels == null) return true;
+
+      for (final channel in channels) {
+        if (channel.id == _channelId) {
+          return channel.importance != Importance.none;
+        }
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> requestPermissions({bool exactAlarm = false}) async {
     try {
       await init();
@@ -110,7 +131,7 @@ class NotificationService {
       final enabled = requestPermission
           ? await requestPermissions()
           : await areNotificationsEnabled();
-      if (!enabled) return false;
+      if (!enabled || !await isReminderChannelEnabled()) return false;
 
       var exact = false;
       if (requestPermission) {
@@ -166,7 +187,9 @@ class NotificationService {
     try {
       await init();
       final allowed = await requestPermissions();
-      if (!allowed) return NotificationTestResult.permissionDenied;
+      if (!allowed || !await isReminderChannelEnabled()) {
+        return NotificationTestResult.permissionDenied;
+      }
 
       const body = 'Thông báo thử đã hoạt động bình thường.';
       await _plugin.show(
@@ -177,8 +200,7 @@ class NotificationService {
         payload: 'lightcoin:test',
       );
 
-      final stillEnabled = await areNotificationsEnabled();
-      return stillEnabled
+      return await isReminderChannelEnabled()
           ? NotificationTestResult.sent
           : NotificationTestResult.permissionDenied;
     } catch (_) {
