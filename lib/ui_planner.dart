@@ -137,6 +137,11 @@ class _CalendarPageState extends State<CalendarPage> {
                 padding: const EdgeInsets.only(bottom: 10),
                 child: DismissableEvent(
                   item: event,
+                  onEdit: () => _showEventForm(
+                    context,
+                    widget.store,
+                    editing: event,
+                  ),
                   onDelete: () => widget.store.deleteEvent(event),
                 ),
               ),
@@ -151,10 +156,12 @@ class DismissableEvent extends StatelessWidget {
   const DismissableEvent({
     super.key,
     required this.item,
+    required this.onEdit,
     required this.onDelete,
   });
 
   final CalendarItem item;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   @override
@@ -178,11 +185,15 @@ class DismissableEvent extends StatelessWidget {
       ),
       onDismissed: (_) => onDelete(),
       child: _Tile(
-        icon: item.remind ? Icons.notifications_active_rounded : Icons.schedule_rounded,
+        icon: item.remind
+            ? Icons.notifications_active_rounded
+            : Icons.schedule_rounded,
         title: item.title,
         subtitle:
             '${_time.format(item.dateTime)} • ${item.category}${item.note.isEmpty ? '' : '\n${item.note}'}',
         accent: _purple,
+        onTap: onEdit,
+        trailing: const Icon(Icons.edit_outlined, size: 19),
       ),
     );
   }
@@ -196,7 +207,7 @@ class SavingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = store.totalSaved;
     final target = store.totalTarget;
-    final remaining = (target - total).clamp(0.0, double.infinity).toDouble();
+    final remaining = store.totalRemaining;
 
     return PageFrame(
       title: 'Tiết kiệm',
@@ -282,6 +293,11 @@ class SavingsPage extends StatelessWidget {
                 child: _GoalCard(
                   goal: goal,
                   onAdd: () => _showAddMoney(context, store, goal),
+                  onEdit: () => _showGoalForm(
+                    context,
+                    store,
+                    editing: goal,
+                  ),
                   onDelete: () async {
                     final confirmed = await _confirmDelete(
                       context,
@@ -303,12 +319,14 @@ class _GoalCard extends StatelessWidget {
   const _GoalCard({
     required this.goal,
     required this.onAdd,
+    this.onEdit,
     this.onDelete,
     this.compact = false,
   });
 
   final SavingGoal goal;
   final VoidCallback onAdd;
+  final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final bool compact;
 
@@ -348,6 +366,12 @@ class _GoalCard extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
+                  ),
+                if (onEdit != null)
+                  IconButton(
+                    tooltip: 'Chỉnh sửa mục tiêu',
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
                   ),
                 if (onDelete != null)
                   IconButton(
