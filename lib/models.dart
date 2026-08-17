@@ -17,7 +17,7 @@ class SavingGoal {
   final double target;
   final double current;
   final DateTime deadline;
-  double get progress => target <= 0 ? 0 : (current / target).clamp(0, 1);
+  double get progress => target <= 0 ? 0.0 : (current / target).clamp(0.0, 1.0).toDouble();
   SavingGoal copyWith({double? current}) => SavingGoal(id: id, name: name, target: target, current: current ?? this.current, deadline: deadline);
   Map<String, dynamic> toJson() => {'id': id, 'name': name, 'target': target, 'current': current, 'deadline': deadline.toIso8601String()};
   factory SavingGoal.fromJson(Map<String, dynamic> j) => SavingGoal(id: j['id'] as int, name: j['name'] as String, target: (j['target'] as num).toDouble(), current: (j['current'] as num).toDouble(), deadline: DateTime.parse(j['deadline'] as String));
