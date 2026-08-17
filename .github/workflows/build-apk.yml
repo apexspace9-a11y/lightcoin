@@ -29,17 +29,17 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Gradle 8.13
+      - name: Gradle 8.14
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.13"
+          gradle-version: "8.14"
 
       - name: Generate Gradle wrapper
         shell: bash
         run: |
           tmp_dir="$(mktemp -d)"
           printf "rootProject.name = 'wrapper'\n" > "$tmp_dir/settings.gradle"
-          gradle -p "$tmp_dir" wrapper --gradle-version 8.13
+          gradle -p "$tmp_dir" wrapper --gradle-version 8.14
           cp "$tmp_dir/gradlew" android/gradlew
           cp "$tmp_dir/gradlew.bat" android/gradlew.bat
           cp "$tmp_dir/gradle/wrapper/gradle-wrapper.jar" android/gradle/wrapper/gradle-wrapper.jar
