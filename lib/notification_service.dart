@@ -8,24 +8,38 @@ import 'package:timezone/timezone.dart' as tz;
 class NotificationService {
   NotificationService._();
   static final instance = NotificationService._();
-  final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
+
+  final FlutterLocalNotificationsPlugin _plugin =
+      FlutterLocalNotificationsPlugin();
   bool _ready = false;
 
   Future<void> init() async {
     if (_ready) return;
+
     tz.initializeTimeZones();
     try {
       final zone = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(zone.identifier));
     } catch (_) {}
+
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('ic_notification'),
     );
     await _plugin.initialize(settings: settings);
+    _ready = true;
+  }
+
+  Future<bool> requestPermissions({bool exactAlarm = false}) async {
+    await init();
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
-    await android?.requestNotificationsPermission();
-    _ready = true;
+    try {
+      await android?.requestNotificationsPermission();
+      if (exactAlarm) {
+        return await android?.requestExactAlarmsPermission() ?? false;
+      }
+    } catch (_) {}
+    return false;
   }
 
   Future<void> schedule({
@@ -33,13 +47,15 @@ class NotificationService {
     required String title,
     required String body,
     required DateTime at,
+    bool requestPermission = false,
   }) async {
     await init();
     if (!at.isAfter(DateTime.now())) return;
 
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    final exact = await android?.requestExactAlarmsPermission() ?? false;
+    var exact = false;
+    if (requestPermission) {
+      exact = await requestPermissions(exactAlarm: true);
+    }
 
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
@@ -77,7 +93,7 @@ class NotificationService {
   }
 
   Future<void> test() async {
-    await init();
+    await requestPermissions();
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
         'lightcoin_reminders',
