@@ -35,7 +35,7 @@ jobs:
           cp analysis_options.yaml "$RUNNER_TEMP/analysis_options.yaml"
           flutter config --no-analytics
           flutter create . --platforms=android --org com.lightcoin --project-name light_coin
-          rm -rf lib
+          rm -rf lib test
           cp -R "$RUNNER_TEMP/lightcoin_lib" lib
           cp "$RUNNER_TEMP/pubspec.yaml" pubspec.yaml
           cp "$RUNNER_TEMP/analysis_options.yaml" analysis_options.yaml
