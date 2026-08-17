@@ -14,7 +14,8 @@ class _CalendarPageState extends State<CalendarPage> {
 
   List<CalendarItem> _for(DateTime day) => widget.store.events
       .where((event) => isSameDay(event.dateTime, day))
-      .toList();
+      .toList()
+    ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +24,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
     return PageFrame(
       title: 'Lịch',
-      subtitle: 'Tập trung vào điều đáng nhớ',
+      subtitle: 'Theo dõi lịch trình theo ngày',
       action: _RoundAdd(
         onTap: () => _showEventForm(
           context,
@@ -44,6 +45,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 selectedDayPredicate: (day) => isSameDay(day, selected),
                 eventLoader: _for,
                 onDaySelected: (selectedDay, focusedDay) {
+                  HapticFeedback.selectionClick();
                   setState(() {
                     selected = selectedDay;
                     focused = focusedDay;
@@ -105,9 +107,20 @@ class _CalendarPageState extends State<CalendarPage> {
                   ),
                 ),
               ),
-              Text(
-                '${selectedEvents.length} mục',
-                style: TextStyle(color: muted),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _purple.withValues(alpha: .09),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${selectedEvents.length} mục',
+                  style: TextStyle(
+                    color: muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ],
           ),
@@ -115,14 +128,14 @@ class _CalendarPageState extends State<CalendarPage> {
           if (selectedEvents.isEmpty)
             const _Empty(
               icon: Icons.event_note_rounded,
-              title: 'Ngày này còn trống',
-              text: 'Bạn có thể giữ nó trống. Một khả năng hiếm hoi nhưng hợp pháp.',
+              title: 'Chưa có lịch trong ngày',
+              text: 'Thêm lịch mới để Light Coin giúp bạn theo dõi đúng thời gian.',
             )
           else
             ...selectedEvents.map(
               (event) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
-                child: DissmissableEvent(
+                child: DismissableEvent(
                   item: event,
                   onDelete: () => widget.store.deleteEvent(event),
                 ),
@@ -134,8 +147,8 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 }
 
-class DissmissableEvent extends StatelessWidget {
-  const DissmissableEvent({
+class DismissableEvent extends StatelessWidget {
+  const DismissableEvent({
     super.key,
     required this.item,
     required this.onDelete,
@@ -149,6 +162,11 @@ class DissmissableEvent extends StatelessWidget {
     return Dismissible(
       key: ValueKey(item.id),
       direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => _confirmDelete(
+        context,
+        title: 'Xóa lịch này?',
+        message: 'Lịch và thông báo liên quan sẽ được xóa.',
+      ),
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 22),
@@ -160,7 +178,7 @@ class DissmissableEvent extends StatelessWidget {
       ),
       onDismissed: (_) => onDelete(),
       child: _Tile(
-        icon: Icons.schedule_rounded,
+        icon: item.remind ? Icons.notifications_active_rounded : Icons.schedule_rounded,
         title: item.title,
         subtitle:
             '${_time.format(item.dateTime)} • ${item.category}${item.note.isEmpty ? '' : '\n${item.note}'}',
@@ -176,11 +194,13 @@ class SavingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total = store.goals.fold<double>(0, (sum, goal) => sum + goal.current);
+    final total = store.totalSaved;
+    final target = store.totalTarget;
+    final remaining = (target - total).clamp(0.0, double.infinity).toDouble();
 
     return PageFrame(
       title: 'Tiết kiệm',
-      subtitle: 'Biến mục tiêu thành con số',
+      subtitle: 'Theo dõi tiến độ theo từng mục tiêu',
       action: _RoundAdd(onTap: () => _showGoalForm(context, store)),
       child: Column(
         children: [
@@ -188,16 +208,21 @@ class SavingsPage extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: _mint.withValues(alpha: .10),
+              gradient: LinearGradient(
+                colors: [
+                  _mint.withValues(alpha: .14),
+                  _purple.withValues(alpha: .08),
+                ],
+              ),
               borderRadius: BorderRadius.circular(24),
             ),
             child: Row(
               children: [
                 Container(
-                  width: 48,
-                  height: 48,
+                  width: 50,
+                  height: 50,
                   decoration: BoxDecoration(
-                    color: _mint.withValues(alpha: .2),
+                    color: _mint.withValues(alpha: .20),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Icon(
@@ -217,6 +242,7 @@ class SavingsPage extends StatelessWidget {
                           fontSize: 12,
                         ),
                       ),
+                      const SizedBox(height: 2),
                       Text(
                         _money.format(total),
                         style: const TextStyle(
@@ -224,6 +250,18 @@ class SavingsPage extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
+                      if (target > 0) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          remaining <= 0
+                              ? 'Đã đạt tổng mục tiêu'
+                              : 'Còn ${_money.format(remaining)} để đạt mục tiêu',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -234,9 +272,8 @@ class SavingsPage extends StatelessWidget {
           if (store.goals.isEmpty)
             const _Empty(
               icon: Icons.flag_outlined,
-              title: 'Tạo mục tiêu đầu tiên',
-              text:
-                  'Chuyến đi, quỹ dự phòng hay một món đồ. Đặt tên, số tiền và hạn hoàn thành.',
+              title: 'Chưa có mục tiêu tiết kiệm',
+              text: 'Tạo mục tiêu với số tiền và thời hạn để bắt đầu theo dõi.',
             )
           else
             ...store.goals.map(
@@ -245,7 +282,14 @@ class SavingsPage extends StatelessWidget {
                 child: _GoalCard(
                   goal: goal,
                   onAdd: () => _showAddMoney(context, store, goal),
-                  onDelete: () => store.deleteGoal(goal.id),
+                  onDelete: () async {
+                    final confirmed = await _confirmDelete(
+                      context,
+                      title: 'Xóa mục tiêu?',
+                      message: 'Tiến độ của mục tiêu này sẽ bị xóa.',
+                    );
+                    if (confirmed) await store.deleteGoal(goal.id);
+                  },
                 ),
               ),
             ),
@@ -270,6 +314,8 @@ class _GoalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final completed = goal.progress >= 1;
+
     return Card(
       child: Padding(
         padding: EdgeInsets.all(compact ? 17 : 20),
@@ -287,8 +333,25 @@ class _GoalCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (completed)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: _mint.withValues(alpha: .12),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: const Text(
+                      'Hoàn thành',
+                      style: TextStyle(
+                        color: _mint,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
                 if (onDelete != null)
                   IconButton(
+                    tooltip: 'Xóa mục tiêu',
                     onPressed: onDelete,
                     icon: const Icon(Icons.delete_outline_rounded),
                   ),
@@ -320,8 +383,8 @@ class _GoalCard extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: goal.progress,
                 minHeight: 9,
-                backgroundColor: _purple.withValues(alpha: .1),
-                valueColor: const AlwaysStoppedAnimation(_purple),
+                backgroundColor: _purple.withValues(alpha: .10),
+                valueColor: AlwaysStoppedAnimation(completed ? _mint : _purple),
               ),
             ),
             const SizedBox(height: 9),
@@ -337,7 +400,10 @@ class _GoalCard extends StatelessWidget {
                   ),
                 ),
                 FilledButton.tonalIcon(
-                  onPressed: onAdd,
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    onAdd();
+                  },
                   icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Nạp'),
                 ),
