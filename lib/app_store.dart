@@ -238,13 +238,15 @@ class AppStore extends ChangeNotifier {
     final p = await _storage();
 
     if (value) {
-      final allowed = await NotificationService.instance.requestPermissions();
-      notifications = allowed;
-      await p.setBool(_kNotifications, allowed);
+      final permission = await NotificationService.instance.requestPermissions();
+      final usable = permission &&
+          await NotificationService.instance.isReminderChannelEnabled();
+      notifications = usable;
+      await p.setBool(_kNotifications, usable);
       notifyListeners();
 
-      if (allowed) unawaited(_rescheduleAllSafe());
-      return allowed;
+      if (usable) unawaited(_rescheduleAllSafe());
+      return usable;
     }
 
     notifications = false;
@@ -270,7 +272,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> _rescheduleAll() async {
     if (!notifications) return;
-    if (!await NotificationService.instance.areNotificationsEnabled()) return;
+    if (!await NotificationService.instance.isReminderChannelEnabled()) return;
 
     final now = DateTime.now();
 
