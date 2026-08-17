@@ -24,14 +24,31 @@ class AppStore extends ChangeNotifier {
   bool notifications = true;
   bool loaded = false;
 
-  double get totalSaved => goals.fold<double>(0, (sum, goal) => sum + goal.current);
-  double get totalTarget => goals.fold<double>(0, (sum, goal) => sum + goal.target);
-  int get activeReminderCount =>
-      reminders.where((item) => item.enabled && !item.done).length;
+  double get totalSaved =>
+      goals.fold<double>(0, (sum, goal) => sum + goal.current);
+  double get totalTarget =>
+      goals.fold<double>(0, (sum, goal) => sum + goal.target);
+  double get totalRemaining => goals.fold<double>(
+        0,
+        (sum, goal) => sum + (goal.target - goal.current).clamp(0, double.infinity),
+      );
+
+  int get activeReminderCount {
+    final now = DateTime.now();
+    return reminders
+        .where(
+          (item) =>
+              item.enabled && !item.done && item.dateTime.isAfter(now),
+        )
+        .length;
+  }
+
   int get todayCount {
     final now = DateTime.now();
     bool sameDay(DateTime value) =>
-        value.year == now.year && value.month == now.month && value.day == now.day;
+        value.year == now.year &&
+        value.month == now.month &&
+        value.day == now.day;
     return events.where((item) => sameDay(item.dateTime)).length +
         reminders.where((item) => !item.done && sameDay(item.dateTime)).length;
   }
@@ -40,26 +57,23 @@ class AppStore extends ChangeNotifier {
       _prefs ??= await SharedPreferences.getInstance();
 
   Future<void> load() async {
-    final p = await _storage();
+    final prefs = await _storage();
 
-    darkMode = p.getBool(_kDark) ?? false;
-    notifications = p.getBool(_kNotifications) ?? true;
+    darkMode = prefs.getBool(_kDark) ?? false;
+    notifications = prefs.getBool(_kNotifications) ?? true;
 
     events
       ..clear()
-      ..addAll(_decode(p.getString(_kEvents), CalendarItem.fromJson));
+      ..addAll(_decode(prefs.getString(_kEvents), CalendarItem.fromJson));
     goals
       ..clear()
-      ..addAll(_decode(p.getString(_kGoals), SavingGoal.fromJson));
+      ..addAll(_decode(prefs.getString(_kGoals), SavingGoal.fromJson));
     reminders
       ..clear()
-      ..addAll(_decode(p.getString(_kReminders), ReminderItem.fromJson));
+      ..addAll(_decode(prefs.getString(_kReminders), ReminderItem.fromJson));
 
-    events.sort((a, b) => a.dateTime.compareTo(b.dateTime));
-    goals.sort((a, b) => a.deadline.compareTo(b.deadline));
-    reminders.sort((a, b) => a.dateTime.compareTo(b.dateTime));
-
-    await _cleanUntouchedLegacySeed(p);
+    _sortAll();
+    await _cleanUntouchedLegacySeed(prefs);
 
     loaded = true;
     notifyListeners();
@@ -67,8 +81,8 @@ class AppStore extends ChangeNotifier {
     if (notifications) {
       unawaited(
         Future<void>.delayed(
-          const Duration(milliseconds: 300),
-          _rescheduleAllSafe,
+          const Duration(milliseconds: 250),
+          _reconcileAndRestoreNotifications,
         ),
       );
     }
@@ -88,8 +102,14 @@ class AppStore extends ChangeNotifier {
     }
   }
 
-  Future<void> _cleanUntouchedLegacySeed(SharedPreferences p) async {
-    if (p.getBool(_kLegacySeedCleaned) == true) return;
+  void _sortAll() {
+    events.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    goals.sort((a, b) => a.deadline.compareTo(b.deadline));
+    reminders.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+  }
+
+  Future<void> _cleanUntouchedLegacySeed(SharedPreferences prefs) async {
+    if (prefs.getBool(_kLegacySeedCleaned) == true) return;
 
     final hasEvent = events.any(
       (item) => item.id == 10001 && item.title == 'Lập kế hoạch tuần',
@@ -113,7 +133,7 @@ class AppStore extends ChangeNotifier {
       await _save();
     }
 
-    await p.setBool(_kLegacySeedCleaned, true);
+    await prefs.setBool(_kLegacySeedCleaned, true);
   }
 
   int nextId() =>
@@ -124,8 +144,26 @@ class AppStore extends ChangeNotifier {
     events.sort((a, b) => a.dateTime.compareTo(b.dateTime));
     notifyListeners();
     await _save();
+    return _scheduleEvent(item, requestPermission: true);
+  }
 
-    if (!item.remind) return true;
+  Future<bool> updateEvent(CalendarItem item) async {
+    final index = events.indexWhere((event) => event.id == item.id);
+    if (index < 0) return false;
+
+    events[index] = item;
+    events.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    notifyListeners();
+    await _save();
+    await NotificationService.instance.cancel(item.id);
+    return _scheduleEvent(item, requestPermission: item.remind);
+  }
+
+  Future<bool> _scheduleEvent(
+    CalendarItem item, {
+    required bool requestPermission,
+  }) async {
+    if (!item.remind || !item.dateTime.isAfter(DateTime.now())) return true;
     if (!notifications) return false;
 
     return NotificationService.instance.schedule(
@@ -133,7 +171,7 @@ class AppStore extends ChangeNotifier {
       title: item.title,
       body: item.note.isEmpty ? 'Bạn có lịch hẹn sắp tới.' : item.note,
       at: item.dateTime,
-      requestPermission: true,
+      requestPermission: requestPermission,
     );
   }
 
@@ -151,14 +189,22 @@ class AppStore extends ChangeNotifier {
     await _save();
   }
 
+  Future<bool> updateGoal(SavingGoal goal) async {
+    final index = goals.indexWhere((item) => item.id == goal.id);
+    if (index < 0) return false;
+    goals[index] = goal;
+    goals.sort((a, b) => a.deadline.compareTo(b.deadline));
+    notifyListeners();
+    await _save();
+    return true;
+  }
+
   Future<void> addMoney(int id, double amount) async {
     final index = goals.indexWhere((goal) => goal.id == id);
-    if (index < 0) return;
+    if (index < 0 || amount <= 0) return;
 
     goals[index] = goals[index].copyWith(
-      current: (goals[index].current + amount)
-          .clamp(0.0, double.infinity)
-          .toDouble(),
+      current: goals[index].current + amount,
     );
     notifyListeners();
     await _save();
@@ -175,8 +221,30 @@ class AppStore extends ChangeNotifier {
     reminders.sort((a, b) => a.dateTime.compareTo(b.dateTime));
     notifyListeners();
     await _save();
+    return _scheduleReminder(reminder, requestPermission: true);
+  }
 
-    if (!reminder.enabled) return true;
+  Future<bool> updateReminder(ReminderItem reminder) async {
+    final index = reminders.indexWhere((item) => item.id == reminder.id);
+    if (index < 0) return false;
+
+    reminders[index] = reminder;
+    reminders.sort((a, b) => a.dateTime.compareTo(b.dateTime));
+    notifyListeners();
+    await _save();
+    await NotificationService.instance.cancel(reminder.id);
+    return _scheduleReminder(
+      reminder,
+      requestPermission: reminder.enabled && !reminder.done,
+    );
+  }
+
+  Future<bool> _scheduleReminder(
+    ReminderItem reminder, {
+    required bool requestPermission,
+  }) async {
+    if (!reminder.enabled || reminder.done) return true;
+    if (!reminder.dateTime.isAfter(DateTime.now())) return false;
     if (!notifications) return false;
 
     return NotificationService.instance.schedule(
@@ -186,7 +254,7 @@ class AppStore extends ChangeNotifier {
           ? 'Đến giờ cho việc bạn đã lên lịch.'
           : reminder.note,
       at: reminder.dateTime,
-      requestPermission: true,
+      requestPermission: requestPermission,
     );
   }
 
@@ -198,6 +266,10 @@ class AppStore extends ChangeNotifier {
     final index = reminders.indexWhere((item) => item.id == reminder.id);
     if (index < 0) return false;
 
+    if (enabled == true && !reminder.dateTime.isAfter(DateTime.now())) {
+      return false;
+    }
+
     final updated = reminder.copyWith(done: done, enabled: enabled);
     reminders[index] = updated;
     notifyListeners();
@@ -208,16 +280,7 @@ class AppStore extends ChangeNotifier {
       return true;
     }
 
-    if (!notifications) return false;
-    return NotificationService.instance.schedule(
-      id: updated.id,
-      title: updated.title,
-      body: updated.note.isEmpty
-          ? 'Đến giờ cho việc bạn đã lên lịch.'
-          : updated.note,
-      at: updated.dateTime,
-      requestPermission: true,
-    );
+    return _scheduleReminder(updated, requestPermission: true);
   }
 
   Future<void> deleteReminder(int id) async {
@@ -230,19 +293,19 @@ class AppStore extends ChangeNotifier {
   Future<void> setDark(bool value) async {
     darkMode = value;
     notifyListeners();
-    final p = await _storage();
-    await p.setBool(_kDark, value);
+    final prefs = await _storage();
+    await prefs.setBool(_kDark, value);
   }
 
   Future<bool> setNotifications(bool value) async {
-    final p = await _storage();
+    final prefs = await _storage();
 
     if (value) {
       final permission = await NotificationService.instance.requestPermissions();
       final usable = permission &&
           await NotificationService.instance.isReminderChannelEnabled();
       notifications = usable;
-      await p.setBool(_kNotifications, usable);
+      await prefs.setBool(_kNotifications, usable);
       notifyListeners();
 
       if (usable) unawaited(_rescheduleAllSafe());
@@ -250,7 +313,7 @@ class AppStore extends ChangeNotifier {
     }
 
     notifications = false;
-    await p.setBool(_kNotifications, false);
+    await prefs.setBool(_kNotifications, false);
     notifyListeners();
 
     for (final event in events) {
@@ -262,11 +325,28 @@ class AppStore extends ChangeNotifier {
     return true;
   }
 
+  Future<void> _reconcileAndRestoreNotifications() async {
+    try {
+      final usable =
+          await NotificationService.instance.isReminderChannelEnabled();
+      if (!usable && notifications) {
+        notifications = false;
+        final prefs = await _storage();
+        await prefs.setBool(_kNotifications, false);
+        notifyListeners();
+        return;
+      }
+      await _rescheduleAll();
+    } catch (_) {
+      // Dịch vụ phụ không được phép ảnh hưởng đến dữ liệu chính của app.
+    }
+  }
+
   Future<void> _rescheduleAllSafe() async {
     try {
       await _rescheduleAll();
     } catch (_) {
-      // Khôi phục nhắc hẹn không được phép làm chậm hoặc làm hỏng app.
+      // Khôi phục notification thất bại không được làm hỏng app.
     }
   }
 
@@ -279,40 +359,28 @@ class AppStore extends ChangeNotifier {
     for (final event in events.where(
       (item) => item.remind && item.dateTime.isAfter(now),
     )) {
-      await NotificationService.instance.schedule(
-        id: event.id,
-        title: event.title,
-        body: event.note.isEmpty ? 'Bạn có lịch hẹn sắp tới.' : event.note,
-        at: event.dateTime,
-      );
+      await _scheduleEvent(event, requestPermission: false);
     }
 
     for (final reminder in reminders.where(
       (item) => item.enabled && !item.done && item.dateTime.isAfter(now),
     )) {
-      await NotificationService.instance.schedule(
-        id: reminder.id,
-        title: reminder.title,
-        body: reminder.note.isEmpty
-            ? 'Đến giờ cho việc bạn đã lên lịch.'
-            : reminder.note,
-        at: reminder.dateTime,
-      );
+      await _scheduleReminder(reminder, requestPermission: false);
     }
   }
 
   Future<void> _save() async {
-    final p = await _storage();
+    final prefs = await _storage();
     await Future.wait([
-      p.setString(
+      prefs.setString(
         _kEvents,
         jsonEncode(events.map((item) => item.toJson()).toList()),
       ),
-      p.setString(
+      prefs.setString(
         _kGoals,
         jsonEncode(goals.map((item) => item.toJson()).toList()),
       ),
-      p.setString(
+      prefs.setString(
         _kReminders,
         jsonEncode(reminders.map((item) => item.toJson()).toList()),
       ),
