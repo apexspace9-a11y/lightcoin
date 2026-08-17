@@ -35,7 +35,15 @@ jobs:
           gradle-version: "8.13"
 
       - name: Generate Gradle wrapper
-        run: gradle -p android wrapper --gradle-version 8.13
+        shell: bash
+        run: |
+          tmp_dir="$(mktemp -d)"
+          printf "rootProject.name = 'wrapper'\n" > "$tmp_dir/settings.gradle"
+          gradle -p "$tmp_dir" wrapper --gradle-version 8.13
+          cp "$tmp_dir/gradlew" android/gradlew
+          cp "$tmp_dir/gradlew.bat" android/gradlew.bat
+          cp "$tmp_dir/gradle/wrapper/gradle-wrapper.jar" android/gradle/wrapper/gradle-wrapper.jar
+          chmod +x android/gradlew
 
       - name: Install packages
         run: flutter pub get
