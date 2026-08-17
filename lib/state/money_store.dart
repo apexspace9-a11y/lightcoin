@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -18,30 +17,28 @@ class MoneyStore extends ChangeNotifier {
 
   String currency = 'VND';
   String theme = 'system';
-  double monthlyBudget = 0;
-  Map<String, double> categoryBudgets = {};
+  double dailyTarget = 0;
   bool dailyReminder = false;
   int reminderHour = 20;
   int reminderMinute = 0;
+  String? activeChallengeId;
+  DateTime? challengeStartedAt;
 
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
     currency = _prefs.getString('currency') ?? 'VND';
     theme = _prefs.getString('theme') ?? 'system';
-    monthlyBudget = _prefs.getDouble('monthly_budget') ?? 0.0;
+    dailyTarget = _prefs.getDouble('daily_saving_target') ?? 0.0;
     dailyReminder = _prefs.getBool('daily_reminder') ?? false;
     reminderHour = _prefs.getInt('reminder_hour') ?? 20;
     reminderMinute = _prefs.getInt('reminder_minute') ?? 0;
+    activeChallengeId = _prefs.getString('active_challenge_id');
+    final started = _prefs.getInt('challenge_started_at');
+    challengeStartedAt = started == null ? null : DateTime.fromMillisecondsSinceEpoch(started);
 
-    final rawBudgets = _prefs.getString('category_budgets');
-    if (rawBudgets != null && rawBudgets.isNotEmpty) {
-      final decoded = jsonDecode(rawBudgets) as Map<String, dynamic>;
-      categoryBudgets = decoded.map(
-        (key, value) => MapEntry(key, (value as num).toDouble()),
-      );
-    }
-
-    transactions = await _db.getTransactions();
+    final allRecords = await _db.getTransactions();
+    transactions = allRecords.where((item) => item.isSavingRecord).toList()
+      ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
     goals = await _db.getGoals();
     ready = true;
     notifyListeners();
@@ -53,94 +50,273 @@ class MoneyStore extends ChangeNotifier {
 
   DateTime get _now => DateTime.now();
 
+  DateTime _day(DateTime value) => DateTime(value.year, value.month, value.day);
+
+  bool _sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
   bool _isCurrentMonth(DateTime date) =>
       date.year == _now.year && date.month == _now.month;
 
-  double get balance => transactions.fold<double>(
+  List<MoneyTransaction> get deposits =>
+      transactions.where((item) => item.isDeposit).toList();
+
+  List<MoneyTransaction> get withdrawals =>
+      transactions.where((item) => item.isWithdrawal).toList();
+
+  double get totalSaved => math.max(
         0.0,
-        (sum, item) => sum + (item.isIncome ? item.amount : -item.amount),
-      );
+        transactions.fold<double>(
+          0.0,
+          (sum, item) => sum + (item.isDeposit ? item.amount : -item.amount),
+        ),
+      ).toDouble();
 
-  double get monthIncome => transactions
-      .where((t) => t.isIncome && _isCurrentMonth(t.occurredAt))
-      .fold<double>(0.0, (sum, item) => sum + item.amount);
+  double get savedToday => transactions
+      .where((item) => _sameDay(item.occurredAt, _now))
+      .fold<double>(0.0, (sum, item) => sum + (item.isDeposit ? item.amount : -item.amount));
 
-  double get monthExpense => transactions
-      .where((t) => !t.isIncome && _isCurrentMonth(t.occurredAt))
-      .fold<double>(0.0, (sum, item) => sum + item.amount);
+  double get savedThisMonth => transactions
+      .where((item) => _isCurrentMonth(item.occurredAt))
+      .fold<double>(0.0, (sum, item) => sum + (item.isDeposit ? item.amount : -item.amount));
 
-  double get savingsRate {
-    if (monthIncome <= 0) return 0;
-    return (((monthIncome - monthExpense) / monthIncome) * 100).clamp(-999.0, 100.0).toDouble();
+  double get freeSaved => math.max(
+        0.0,
+        transactions.where((item) => item.category == 'free').fold<double>(
+              0.0,
+              (sum, item) => sum + (item.isDeposit ? item.amount : -item.amount),
+            ),
+      ).toDouble();
+
+  double get totalGoalTarget =>
+      goals.fold<double>(0.0, (sum, goal) => sum + goal.target);
+
+  double get goalSavedTotal =>
+      goals.fold<double>(0.0, (sum, goal) => sum + goal.saved);
+
+  double get unassignedSaved => math.max(0.0, totalSaved - goalSavedTotal).toDouble();
+
+  double get overallGoalProgress => totalGoalTarget <= 0
+      ? 0.0
+      : (goalSavedTotal / totalGoalTarget).clamp(0.0, 1.0).toDouble();
+
+  double dailyNeededForGoal(SavingGoal goal) {
+    if (goal.completed) return 0;
+    final end = goal.deadline == null ? _day(_now.add(const Duration(days: 90))) : _day(goal.deadline!);
+    final days = math.max(1, end.difference(_day(_now)).inDays + 1);
+    return goal.remaining / days;
   }
 
-  double get budgetProgress =>
-      monthlyBudget <= 0 ? 0.0 : (monthExpense / monthlyBudget).clamp(0.0, 2.0).toDouble();
-
-  double get remainingBudget => monthlyBudget <= 0 ? 0 : monthlyBudget - monthExpense;
-
-  double get safeDailySpend {
-    if (monthlyBudget <= 0) return 0;
-    final lastDay = DateTime(_now.year, _now.month + 1, 0).day;
-    final daysLeft = math.max(1, lastDay - _now.day + 1);
-    return math.max(0.0, remainingBudget).toDouble() / daysLeft;
+  double get suggestedDailySaving {
+    if (goals.isEmpty) return 0;
+    return goals.fold<double>(0.0, (sum, goal) => sum + dailyNeededForGoal(goal));
   }
 
-  Map<String, double> get currentMonthExpensesByCategory {
-    final result = <String, double>{};
-    for (final item in transactions.where(
-      (t) => !t.isIncome && _isCurrentMonth(t.occurredAt),
-    )) {
-      result[item.category] = (result[item.category] ?? 0.0) + item.amount;
+  double get effectiveDailyTarget => dailyTarget > 0 ? dailyTarget : suggestedDailySaving;
+
+  double get todayProgress => effectiveDailyTarget <= 0
+      ? 0.0
+      : (math.max(0.0, savedToday) / effectiveDailyTarget).clamp(0.0, 1.0).toDouble();
+
+  Set<DateTime> get _savingDays {
+    final unique = <String, DateTime>{};
+    for (final item in deposits) {
+      final day = _day(item.occurredAt);
+      unique['${day.year}-${day.month}-${day.day}'] = day;
     }
-    return result;
+    return unique.values.toSet();
   }
 
-  List<double> get lastSixMonthNet {
-    final now = _now;
-    return List<double>.generate(6, (index) {
-      final offset = 5 - index;
-      final date = DateTime(now.year, now.month - offset, 1);
-      return transactions.where((t) {
-        return t.occurredAt.year == date.year && t.occurredAt.month == date.month;
-      }).fold<double>(0.0, (sum, item) => sum + (item.isIncome ? item.amount : -item.amount));
-    });
+  int get currentStreak {
+    final days = _savingDays;
+    if (days.isEmpty) return 0;
+    var cursor = _day(_now);
+    if (!days.contains(cursor)) cursor = cursor.subtract(const Duration(days: 1));
+    var streak = 0;
+    while (days.contains(cursor)) {
+      streak += 1;
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+    return streak;
   }
 
-  List<String> get lastSixMonthLabels {
-    final now = _now;
-    return List<String>.generate(6, (index) {
-      final offset = 5 - index;
-      final date = DateTime(now.year, now.month - offset, 1);
-      return 'T${date.month}';
-    });
+  int get bestStreak {
+    final days = _savingDays.toList()..sort();
+    if (days.isEmpty) return 0;
+    var best = 1;
+    var run = 1;
+    for (var i = 1; i < days.length; i++) {
+      if (days[i].difference(days[i - 1]).inDays == 1) {
+        run += 1;
+      } else {
+        run = 1;
+      }
+      best = math.max(best, run);
+    }
+    return best;
   }
 
-  Future<void> addTransaction({
-    required String type,
+  int get savedDaysThisMonth => _savingDays.where(_isCurrentMonth).length;
+
+  int get depositCount => deposits.length;
+
+  List<double> get last7DaySavings => List<double>.generate(7, (index) {
+        final day = _day(_now.subtract(Duration(days: 6 - index)));
+        return deposits
+            .where((item) => _sameDay(item.occurredAt, day))
+            .fold<double>(0.0, (sum, item) => sum + item.amount);
+      });
+
+  List<String> get last7DayLabels => List<String>.generate(7, (index) {
+        final day = _now.subtract(Duration(days: 6 - index));
+        const names = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+        return names[day.weekday - 1];
+      });
+
+  SavingsChallengeDefinition? get activeChallenge {
+    final id = activeChallengeId;
+    if (id == null) return null;
+    for (final item in savingsChallenges) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
+
+  int get challengeProgress {
+    final challenge = activeChallenge;
+    final started = challengeStartedAt;
+    if (challenge == null || started == null) return 0;
+    final eligible = deposits.where((item) => !item.occurredAt.isBefore(_day(started))).toList();
+    if (challenge.metric == 'entries') return eligible.length;
+    final days = <String>{};
+    for (final item in eligible) {
+      final day = item.occurredAt;
+      days.add('${day.year}-${day.month}-${day.day}');
+    }
+    return days.length;
+  }
+
+  bool get challengeCompleted {
+    final challenge = activeChallenge;
+    return challenge != null && challengeProgress >= challenge.target;
+  }
+
+  SavingGoal? goalById(int? id) {
+    if (id == null) return null;
+    for (final goal in goals) {
+      if (goal.id == id) return goal;
+    }
+    return null;
+  }
+
+  String _categoryForGoal(SavingGoal? goal) =>
+      goal == null ? 'free' : 'goal:${goal.id}|${goal.name}';
+
+  Future<void> deposit({
+    int? goalId,
     required double amount,
-    required String category,
     required String note,
     required DateTime occurredAt,
   }) async {
+    if (amount <= 0) return;
+    final goal = goalById(goalId);
+    if (goalId != null && goal == null) return;
+
+    if (goal != null && goal.id != null) {
+      final index = goals.indexWhere((item) => item.id == goal.id);
+      final newSaved = goal.saved + amount;
+      await _db.updateGoalSaved(goal.id!, newSaved);
+      goals[index] = SavingGoal(
+        id: goal.id,
+        name: goal.name,
+        target: goal.target,
+        saved: newSaved,
+        deadline: goal.deadline,
+        createdAt: goal.createdAt,
+      );
+    }
+
     final saved = await _db.addTransaction(MoneyTransaction(
-      type: type,
+      type: 'saving',
       amount: amount,
-      category: category,
+      category: _categoryForGoal(goal),
       note: note.trim(),
       occurredAt: occurredAt,
     ));
     transactions = [saved, ...transactions]
       ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
     notifyListeners();
-    if (type == 'expense' && _isCurrentMonth(occurredAt)) {
-      await _checkBudgetAlerts(category);
+
+    if (goal != null && goal.saved < goal.target && goal.saved + amount >= goal.target) {
+      await NotificationService.instance.showSavingsAlert(
+        title: 'Hũ đã đầy',
+        body: 'Bạn đã hoàn thành mục tiêu “${goal.name}”. Một cột mốc rất đáng giữ nhịp.',
+      );
     }
+    await _checkChallengeCompletion();
   }
 
-  Future<void> deleteTransaction(int id) async {
+  Future<bool> withdraw({
+    int? goalId,
+    required double amount,
+    required String note,
+    required DateTime occurredAt,
+  }) async {
+    if (amount <= 0) return false;
+    final goal = goalById(goalId);
+    if (goalId != null && goal == null) return false;
+    final available = goal?.saved ?? freeSaved;
+    if (amount > available) return false;
+
+    if (goal != null && goal.id != null) {
+      final index = goals.indexWhere((item) => item.id == goal.id);
+      final newSaved = math.max(0.0, goal.saved - amount).toDouble();
+      await _db.updateGoalSaved(goal.id!, newSaved);
+      goals[index] = SavingGoal(
+        id: goal.id,
+        name: goal.name,
+        target: goal.target,
+        saved: newSaved,
+        deadline: goal.deadline,
+        createdAt: goal.createdAt,
+      );
+    }
+
+    final saved = await _db.addTransaction(MoneyTransaction(
+      type: 'withdrawal',
+      amount: amount,
+      category: _categoryForGoal(goal),
+      note: note.trim(),
+      occurredAt: occurredAt,
+    ));
+    transactions = [saved, ...transactions]
+      ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> deleteSavingRecord(int id) async {
+    final index = transactions.indexWhere((item) => item.id == id);
+    if (index < 0) return;
+    final record = transactions[index];
+    final goal = goalById(record.goalId);
+    if (goal != null && goal.id != null) {
+      final goalIndex = goals.indexWhere((item) => item.id == goal.id);
+      final adjusted = record.isDeposit
+          ? math.max(0.0, goal.saved - record.amount).toDouble()
+          : goal.saved + record.amount;
+      await _db.updateGoalSaved(goal.id!, adjusted);
+      goals[goalIndex] = SavingGoal(
+        id: goal.id,
+        name: goal.name,
+        target: goal.target,
+        saved: adjusted,
+        deadline: goal.deadline,
+        createdAt: goal.createdAt,
+      );
+    }
     await _db.deleteTransaction(id);
-    transactions = transactions.where((item) => item.id != id).toList();
+    transactions.removeAt(index);
     notifyListeners();
   }
 
@@ -149,6 +325,7 @@ class MoneyStore extends ChangeNotifier {
     required double target,
     DateTime? deadline,
   }) async {
+    if (name.trim().isEmpty || target <= 0) return;
     final saved = await _db.addGoal(SavingGoal(
       name: name.trim(),
       target: target,
@@ -160,33 +337,41 @@ class MoneyStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addToGoal(int id, double amount) async {
-    final index = goals.indexWhere((goal) => goal.id == id);
-    if (index < 0) return;
-    final goal = goals[index];
-    final newSaved = math.max(0.0, goal.saved + amount).toDouble();
-    await _db.updateGoalSaved(id, newSaved);
-    goals[index] = SavingGoal(
-      id: goal.id,
-      name: goal.name,
-      target: goal.target,
-      saved: newSaved,
-      deadline: goal.deadline,
-      createdAt: goal.createdAt,
-    );
-    notifyListeners();
-    if (newSaved >= goal.target && goal.saved < goal.target) {
-      await NotificationService.instance.showBudgetAlert(
-        title: 'Mục tiêu đã hoàn thành',
-        body: 'Bạn đã hoàn thành mục tiêu “${goal.name}”. Hãy tiếp tục duy trì thói quen tiết kiệm.',
-      );
-    }
-  }
-
   Future<void> deleteGoal(int id) async {
     await _db.deleteGoal(id);
     goals = goals.where((goal) => goal.id != id).toList();
     notifyListeners();
+  }
+
+  Future<void> startChallenge(String id) async {
+    final exists = savingsChallenges.any((item) => item.id == id);
+    if (!exists) return;
+    activeChallengeId = id;
+    challengeStartedAt = _day(DateTime.now());
+    await _prefs.setString('active_challenge_id', id);
+    await _prefs.setInt('challenge_started_at', challengeStartedAt!.millisecondsSinceEpoch);
+    notifyListeners();
+  }
+
+  Future<void> stopChallenge() async {
+    activeChallengeId = null;
+    challengeStartedAt = null;
+    await _prefs.remove('active_challenge_id');
+    await _prefs.remove('challenge_started_at');
+    notifyListeners();
+  }
+
+  Future<void> _checkChallengeCompletion() async {
+    final challenge = activeChallenge;
+    final started = challengeStartedAt;
+    if (challenge == null || started == null || !challengeCompleted) return;
+    final key = 'challenge_done_${challenge.id}_${started.millisecondsSinceEpoch}';
+    if (_prefs.getBool(key) ?? false) return;
+    await _prefs.setBool(key, true);
+    await NotificationService.instance.showSavingsAlert(
+      title: 'Thử thách hoàn thành',
+      body: 'Bạn đã hoàn thành “${challenge.title}”. Chuỗi thói quen này đáng được tiếp tục.',
+    );
   }
 
   Future<void> setCurrency(String value) async {
@@ -201,19 +386,9 @@ class MoneyStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setMonthlyBudget(double value) async {
-    monthlyBudget = math.max(0.0, value).toDouble();
-    await _prefs.setDouble('monthly_budget', monthlyBudget);
-    notifyListeners();
-  }
-
-  Future<void> setCategoryBudget(String category, double value) async {
-    if (value <= 0) {
-      categoryBudgets.remove(category);
-    } else {
-      categoryBudgets[category] = value;
-    }
-    await _prefs.setString('category_budgets', jsonEncode(categoryBudgets));
+  Future<void> setDailyTarget(double value) async {
+    dailyTarget = math.max(0.0, value).toDouble();
+    await _prefs.setDouble('daily_saving_target', dailyTarget);
     notifyListeners();
   }
 
@@ -240,62 +415,15 @@ class MoneyStore extends ChangeNotifier {
     await _db.clearAll();
     transactions = [];
     goals = [];
-    monthlyBudget = 0;
-    categoryBudgets = {};
-    await _prefs.remove('monthly_budget');
-    await _prefs.remove('category_budgets');
-    final keys = _prefs.getKeys().where((key) => key.startsWith('alert_')).toList();
-    for (final key in keys) {
+    dailyTarget = 0;
+    activeChallengeId = null;
+    challengeStartedAt = null;
+    await _prefs.remove('daily_saving_target');
+    await _prefs.remove('active_challenge_id');
+    await _prefs.remove('challenge_started_at');
+    for (final key in _prefs.getKeys().where((key) => key.startsWith('challenge_done_')).toList()) {
       await _prefs.remove(key);
     }
     notifyListeners();
-  }
-
-  Future<void> _checkBudgetAlerts(String category) async {
-    final monthKey = '${_now.year}_${_now.month}';
-    if (monthlyBudget > 0) {
-      final ratio = monthExpense / monthlyBudget;
-      await _alertThreshold(
-        keyBase: 'alert_total_$monthKey',
-        ratio: ratio,
-        label: 'ngân sách tháng',
-      );
-    }
-
-    final categoryLimit = categoryBudgets[category] ?? 0.0;
-    if (categoryLimit > 0) {
-      final spent = currentMonthExpensesByCategory[category] ?? 0.0;
-      await _alertThreshold(
-        keyBase: 'alert_${category}_$monthKey',
-        ratio: spent / categoryLimit,
-        label: 'ngân sách $category',
-      );
-    }
-  }
-
-  Future<void> _alertThreshold({
-    required String keyBase,
-    required double ratio,
-    required String label,
-  }) async {
-    if (ratio >= 1) {
-      final key = '${keyBase}_100';
-      if (!(_prefs.getBool(key) ?? false)) {
-        await _prefs.setBool(key, true);
-        await NotificationService.instance.showBudgetAlert(
-          title: 'Đã vượt $label',
-          body: 'Chi tiêu đã chạm ${(ratio * 100).round()}%. Hãy xem lại các khoản chi còn lại trong tháng.',
-        );
-      }
-    } else if (ratio >= .8) {
-      final key = '${keyBase}_80';
-      if (!(_prefs.getBool(key) ?? false)) {
-        await _prefs.setBool(key, true);
-        await NotificationService.instance.showBudgetAlert(
-          title: 'Sắp chạm $label',
-          body: 'Bạn đã dùng ${(ratio * 100).round()}%. Phần còn lại nên được tiêu có chủ đích.',
-        );
-      }
-    }
   }
 }
