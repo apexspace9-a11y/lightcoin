@@ -71,7 +71,7 @@ jobs:
           x = x.replace('android:label="light_coin"', 'android:label="Light Coin"')
           x = x.replace(
               'android:icon="@mipmap/ic_launcher"',
-              'android:icon="@drawable/ic_launcher_lightcoin"\n        android:roundIcon="@drawable/ic_launcher_lightcoin"',
+              'android:icon="@drawable/ic_launcher_lightcoin"\n        android:roundIcon="@drawable/ic_launcher_lightcoin"\n        android:allowBackup="false"',
           )
           receivers = '''\n        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n            <intent-filter>\n                <action android:name="android.intent.action.BOOT_COMPLETED"/>\n                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>\n                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>\n                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>\n            </intent-filter>\n        </receiver>\n'''
           x = x.replace(
@@ -80,6 +80,50 @@ jobs:
           )
           m.write_text(x)
           PY
+
+          cat > android/app/src/main/kotlin/com/lightcoin/light_coin/MainActivity.kt <<'KOTLIN'
+          package com.lightcoin.light_coin
+
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
+          import android.provider.Settings
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+
+          class MainActivity : FlutterActivity() {
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(
+                      flutterEngine.dartExecutor.binaryMessenger,
+                      "lightcoin/system"
+                  ).setMethodCallHandler { call, result ->
+                      when (call.method) {
+                          "openNotificationSettings" -> {
+                              try {
+                                  val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                      Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                          putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                      }
+                                  } else {
+                                      Intent(
+                                          Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                          Uri.parse("package:$packageName")
+                                      )
+                                  }
+                                  startActivity(intent)
+                                  result.success(true)
+                              } catch (_: Exception) {
+                                  result.success(false)
+                              }
+                          }
+                          else -> result.notImplemented()
+                      }
+                  }
+              }
+          }
+          KOTLIN
 
           cat > android/app/src/main/res/drawable/ic_notification.xml <<'XML'
           <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
