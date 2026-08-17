@@ -15,7 +15,23 @@ class MoneyTransaction {
   final String note;
   final DateTime occurredAt;
 
-  bool get isIncome => type == 'income';
+  bool get isDeposit => type == 'saving';
+  bool get isWithdrawal => type == 'withdrawal';
+  bool get isSavingRecord => isDeposit || isWithdrawal;
+
+  int? get goalId {
+    if (!category.startsWith('goal:')) return null;
+    final raw = category.substring(5).split('|').first;
+    return int.tryParse(raw);
+  }
+
+  String get goalName {
+    if (category == 'free') return 'Quỹ tự do';
+    if (!category.startsWith('goal:')) return category;
+    final split = category.split('|');
+    if (split.length > 1 && split[1].trim().isNotEmpty) return split.sublist(1).join('|');
+    return 'Hũ tiết kiệm';
+  }
 
   Map<String, Object?> toMap() => {
         'id': id,
@@ -55,6 +71,7 @@ class SavingGoal {
 
   double get progress => target <= 0 ? 0.0 : (saved / target).clamp(0.0, 1.0).toDouble();
   bool get completed => target > 0 && saved >= target;
+  double get remaining => (target - saved).clamp(0.0, double.infinity).toDouble();
 
   Map<String, Object?> toMap() => {
         'id': id,
@@ -77,24 +94,49 @@ class SavingGoal {
       );
 }
 
-const expenseCategories = <String>[
-  'Ăn uống',
-  'Di chuyển',
-  'Mua sắm',
-  'Hóa đơn',
-  'Nhà ở',
-  'Sức khỏe',
-  'Giải trí',
-  'Giáo dục',
-  'Gia đình',
-  'Khác',
-];
+class SavingsChallengeDefinition {
+  const SavingsChallengeDefinition({
+    required this.id,
+    required this.title,
+    required this.subtitle,
+    required this.target,
+    required this.metric,
+  });
 
-const incomeCategories = <String>[
-  'Lương',
-  'Thưởng',
-  'Kinh doanh',
-  'Đầu tư',
-  'Quà tặng',
-  'Khác',
+  final String id;
+  final String title;
+  final String subtitle;
+  final int target;
+  final String metric;
+}
+
+const savingsChallenges = <SavingsChallengeDefinition>[
+  SavingsChallengeDefinition(
+    id: 'seven_days',
+    title: '7 ngày tạo đà',
+    subtitle: 'Bỏ tiền vào hũ trong 7 ngày khác nhau để tạo nhịp tiết kiệm.',
+    target: 7,
+    metric: 'days',
+  ),
+  SavingsChallengeDefinition(
+    id: 'twenty_one_days',
+    title: '21 ngày thành thói quen',
+    subtitle: 'Hoàn thành 21 ngày có tiết kiệm, không cần số tiền lớn.',
+    target: 21,
+    metric: 'days',
+  ),
+  SavingsChallengeDefinition(
+    id: 'thirty_deposits',
+    title: '30 lần bỏ ống',
+    subtitle: 'Tích lũy bằng 30 khoản gửi, nhỏ cũng được, miễn là đều.',
+    target: 30,
+    metric: 'entries',
+  ),
+  SavingsChallengeDefinition(
+    id: 'hundred_deposits',
+    title: '100 lần tích lũy',
+    subtitle: 'Một thử thách dài hơi cho người muốn biến tiết kiệm thành phản xạ.',
+    target: 100,
+    metric: 'entries',
+  ),
 ];
