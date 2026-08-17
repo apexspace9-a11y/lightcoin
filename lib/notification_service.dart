@@ -1,13 +1,20 @@
 import 'dart:ui' show Color;
 
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
+enum NotificationTestResult { sent, permissionDenied, failed }
+
 class NotificationService {
   NotificationService._();
   static final instance = NotificationService._();
+
+  static const _channelId = 'lightcoin_reminders';
+  static const _channelName = 'Nhắc hẹn Light Coin';
+  static const _system = MethodChannel('lightcoin/system');
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
@@ -20,7 +27,9 @@ class NotificationService {
     try {
       final zone = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(zone.identifier));
-    } catch (_) {}
+    } catch (_) {
+      // Hệ thống vẫn có thể gửi notification với timezone mặc định.
+    }
 
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('ic_notification'),
@@ -29,92 +38,151 @@ class NotificationService {
     _ready = true;
   }
 
-  Future<bool> requestPermissions({bool exactAlarm = false}) async {
-    await init();
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+  AndroidFlutterLocalNotificationsPlugin? get _android =>
+      _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+
+  Future<bool> areNotificationsEnabled() async {
     try {
-      await android?.requestNotificationsPermission();
-      if (exactAlarm) {
-        return await android?.requestExactAlarmsPermission() ?? false;
-      }
-    } catch (_) {}
-    return false;
+      await init();
+      return await _android?.areNotificationsEnabled() ?? true;
+    } catch (_) {
+      return false;
+    }
   }
 
-  Future<void> schedule({
+  Future<bool> requestPermissions({bool exactAlarm = false}) async {
+    try {
+      await init();
+      final android = _android;
+      if (android == null) return true;
+
+      var enabled = await android.areNotificationsEnabled() ?? true;
+      if (!enabled) {
+        enabled = await android.requestNotificationsPermission() ?? false;
+      }
+      if (!enabled) return false;
+
+      if (!exactAlarm) return true;
+      return await android.requestExactAlarmsPermission() ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> openSystemSettings() async {
+    try {
+      return await _system.invokeMethod<bool>('openNotificationSettings') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  NotificationDetails _details(String body) => NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channelId,
+          _channelName,
+          channelDescription: 'Lịch hẹn, công việc và mục tiêu quan trọng',
+          importance: Importance.max,
+          priority: Priority.high,
+          category: AndroidNotificationCategory.reminder,
+          styleInformation: BigTextStyleInformation(body),
+          ticker: 'Light Coin',
+          icon: 'ic_notification',
+          color: const Color(0xFF6D5DFB),
+          enableVibration: true,
+          playSound: true,
+          visibility: NotificationVisibility.public,
+        ),
+      );
+
+  Future<bool> schedule({
     required int id,
     required String title,
     required String body,
     required DateTime at,
     bool requestPermission = false,
   }) async {
-    await init();
-    if (!at.isAfter(DateTime.now())) return;
+    if (!at.isAfter(DateTime.now())) return false;
 
-    var exact = false;
-    if (requestPermission) {
-      exact = await requestPermissions(exactAlarm: true);
+    try {
+      await init();
+      final enabled = requestPermission
+          ? await requestPermissions()
+          : await areNotificationsEnabled();
+      if (!enabled) return false;
+
+      var exact = false;
+      if (requestPermission) {
+        try {
+          exact = await _android?.requestExactAlarmsPermission() ?? false;
+        } catch (_) {
+          exact = false;
+        }
+      }
+
+      final scheduled = tz.TZDateTime.from(at, tz.local);
+      final details = _details(body);
+
+      try {
+        await _plugin.zonedSchedule(
+          id: id,
+          title: title,
+          body: body,
+          scheduledDate: scheduled,
+          notificationDetails: details,
+          androidScheduleMode: exact
+              ? AndroidScheduleMode.exactAllowWhileIdle
+              : AndroidScheduleMode.inexactAllowWhileIdle,
+          payload: 'lightcoin:$id',
+        );
+      } catch (_) {
+        await _plugin.zonedSchedule(
+          id: id,
+          title: title,
+          body: body,
+          scheduledDate: scheduled,
+          notificationDetails: details,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          payload: 'lightcoin:$id',
+        );
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
-
-    final details = NotificationDetails(
-      android: AndroidNotificationDetails(
-        'lightcoin_reminders',
-        'Nhắc hẹn Light Coin',
-        channelDescription: 'Lịch hẹn, công việc và mục tiêu quan trọng',
-        importance: Importance.max,
-        priority: Priority.high,
-        category: AndroidNotificationCategory.reminder,
-        styleInformation: BigTextStyleInformation(body),
-        ticker: 'Light Coin',
-        icon: 'ic_notification',
-        color: const Color(0xFF6D5DFB),
-        enableVibration: true,
-        playSound: true,
-      ),
-    );
-
-    await _plugin.zonedSchedule(
-      id: id,
-      title: title,
-      body: body,
-      scheduledDate: tz.TZDateTime.from(at, tz.local),
-      notificationDetails: details,
-      androidScheduleMode: exact
-          ? AndroidScheduleMode.exactAllowWhileIdle
-          : AndroidScheduleMode.inexactAllowWhileIdle,
-      payload: 'lightcoin:$id',
-    );
   }
 
   Future<void> cancel(int id) async {
-    await init();
-    await _plugin.cancel(id: id);
+    try {
+      await init();
+      await _plugin.cancel(id: id);
+    } catch (_) {
+      // Xóa dữ liệu trong app không được thất bại chỉ vì notification service lỗi.
+    }
   }
 
-  Future<void> test() async {
-    await requestPermissions();
-    const details = NotificationDetails(
-      android: AndroidNotificationDetails(
-        'lightcoin_reminders',
-        'Nhắc hẹn Light Coin',
-        channelDescription: 'Lịch hẹn, công việc và mục tiêu quan trọng',
-        importance: Importance.max,
-        priority: Priority.high,
-        category: AndroidNotificationCategory.reminder,
-        styleInformation:
-            BigTextStyleInformation('Thông báo của bạn đã sẵn sàng.'),
-        icon: 'ic_notification',
-        color: Color(0xFF6D5DFB),
-        enableVibration: true,
-        playSound: true,
-      ),
-    );
-    await _plugin.show(
-      id: 991001,
-      title: 'Light Coin',
-      body: 'Thông báo của bạn đã sẵn sàng ✨',
-      notificationDetails: details,
-    );
+  Future<NotificationTestResult> test() async {
+    try {
+      await init();
+      final allowed = await requestPermissions();
+      if (!allowed) return NotificationTestResult.permissionDenied;
+
+      const body = 'Thông báo thử đã hoạt động bình thường.';
+      await _plugin.show(
+        id: 991001,
+        title: 'Light Coin',
+        body: body,
+        notificationDetails: _details(body),
+        payload: 'lightcoin:test',
+      );
+
+      final stillEnabled = await areNotificationsEnabled();
+      return stillEnabled
+          ? NotificationTestResult.sent
+          : NotificationTestResult.permissionDenied;
+    } catch (_) {
+      return NotificationTestResult.failed;
+    }
   }
 }
