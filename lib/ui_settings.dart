@@ -6,7 +6,9 @@ Future<void> _showNotificationBlocked(BuildContext context) async {
     ..hideCurrentSnackBar()
     ..showSnackBar(
       SnackBar(
-        content: const Text('Thông báo đang bị tắt. Hãy cấp quyền để nhận nhắc hẹn.'),
+        content: const Text(
+          'Thông báo đang bị tắt. Hãy cấp quyền để nhận nhắc hẹn.',
+        ),
         action: SnackBarAction(
           label: 'Cài đặt',
           onPressed: () {
@@ -48,29 +50,74 @@ class RemindersPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final active = store.reminders.where((item) => !item.done).toList();
+    final now = DateTime.now();
+    final upcoming = store.reminders
+        .where((item) => !item.done && item.dateTime.isAfter(now))
+        .toList();
+    final overdue = store.reminders
+        .where((item) => !item.done && !item.dateTime.isAfter(now))
+        .toList();
     final done = store.reminders.where((item) => item.done).toList();
 
     return PageFrame(
       title: 'Nhắc hẹn',
-      subtitle: '${active.length} lời nhắc đang theo dõi',
+      subtitle: '${upcoming.length} lời nhắc sắp tới',
       action: _RoundAdd(onTap: () => _showReminderForm(context, store)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (active.isEmpty)
+          if (upcoming.isEmpty && overdue.isEmpty)
             const _Empty(
               icon: Icons.notifications_none_rounded,
               title: 'Chưa có lời nhắc',
               text: 'Tạo lời nhắc cho công việc, cuộc gọi, hóa đơn hoặc lịch cá nhân.',
             )
           else
-            ...active.map(
+            ...upcoming.map(
               (item) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _ReminderCard(reminder: item, store: store),
               ),
             ),
+          if (overdue.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Đã quá thời gian',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Text(
+                    '${overdue.length}',
+                    style: const TextStyle(
+                      color: Colors.orange,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...overdue.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _ReminderCard(
+                  reminder: item,
+                  store: store,
+                  overdue: true,
+                ),
+              ),
+            ),
+          ],
           if (done.isNotEmpty) ...[
             const SizedBox(height: 20),
             const Text(
@@ -92,9 +139,15 @@ class RemindersPage extends StatelessWidget {
 }
 
 class _ReminderCard extends StatelessWidget {
-  const _ReminderCard({required this.reminder, required this.store});
+  const _ReminderCard({
+    required this.reminder,
+    required this.store,
+    this.overdue = false,
+  });
+
   final ReminderItem reminder;
   final AppStore store;
+  final bool overdue;
 
   Future<void> _toggle(
     BuildContext context, {
@@ -107,12 +160,19 @@ class _ReminderCard extends StatelessWidget {
       done: done,
       enabled: enabled,
     );
-    if (!ok && context.mounted) await _showNotificationBlocked(context);
+    if (!ok && context.mounted) {
+      if (overdue && enabled == true) {
+        _formMessage(context, 'Hãy chỉnh thời gian sang tương lai trước khi bật lại.');
+      } else {
+        await _showNotificationBlocked(context);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final accent = overdue ? Colors.orange : _purple;
 
     return Card(
       child: Padding(
@@ -128,19 +188,39 @@ class _ReminderCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    reminder.title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      decoration:
-                          reminder.done ? TextDecoration.lineThrough : null,
-                      color: reminder.done ? muted : null,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          reminder.title,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            decoration: reminder.done
+                                ? TextDecoration.lineThrough
+                                : null,
+                            color: reminder.done ? muted : null,
+                          ),
+                        ),
+                      ),
+                      if (overdue)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 8),
+                          child: Icon(
+                            Icons.schedule_rounded,
+                            size: 17,
+                            color: Colors.orange,
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '${_day.format(reminder.dateTime)} • ${_time.format(reminder.dateTime)}${reminder.note.isEmpty ? '' : '\n${reminder.note}'}',
-                    style: TextStyle(fontSize: 12, color: muted, height: 1.35),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: overdue ? accent : muted,
+                      height: 1.35,
+                    ),
                   ),
                 ],
               ),
@@ -154,6 +234,10 @@ class _ReminderCard extends StatelessWidget {
             PopupMenuButton<String>(
               tooltip: 'Tùy chọn',
               onSelected: (value) async {
+                if (value == 'edit') {
+                  await _showReminderForm(context, store, editing: reminder);
+                  return;
+                }
                 if (value != 'delete') return;
                 final confirmed = await _confirmDelete(
                   context,
@@ -162,8 +246,19 @@ class _ReminderCard extends StatelessWidget {
                 );
                 if (confirmed) await store.deleteReminder(reminder.id);
               },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
+              itemBuilder: (_) => [
+                if (!reminder.done)
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined),
+                        SizedBox(width: 10),
+                        Text('Chỉnh sửa'),
+                      ],
+                    ),
+                  ),
+                const PopupMenuItem(
                   value: 'delete',
                   child: Row(
                     children: [
@@ -268,13 +363,13 @@ class _SettingsPageState extends State<SettingsPage>
     final permissionText = permission == null
         ? 'Đang kiểm tra'
         : permission
-            ? 'Được phép'
+            ? 'Sẵn sàng'
             : 'Đang bị chặn';
     final permissionColor = permission == false ? Colors.orange : _mint;
 
     return PageFrame(
       title: 'Cài đặt',
-      subtitle: 'Cá nhân hóa Light Coin',
+      subtitle: 'Quyền, giao diện và dữ liệu',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -312,7 +407,7 @@ class _SettingsPageState extends State<SettingsPage>
                             ),
                             SizedBox(height: 3),
                             Text(
-                              'Trạng thái quyền trên thiết bị',
+                              'Quyền ứng dụng và kênh nhắc hẹn',
                               style: TextStyle(fontSize: 12),
                             ),
                           ],
@@ -346,7 +441,7 @@ class _SettingsPageState extends State<SettingsPage>
                       'Nhắc hẹn trong Light Coin',
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    subtitle: const Text('Lịch, công việc và lời nhắc đã bật'),
+                    subtitle: const Text('Lịch và lời nhắc có thể gửi notification'),
                     value: widget.store.notifications,
                     onChanged: _switching ? null : _toggleNotifications,
                   ),
@@ -405,25 +500,51 @@ class _SettingsPageState extends State<SettingsPage>
           Card(
             child: Padding(
               padding: const EdgeInsets.all(18),
-              child: Row(
+              child: Column(
                 children: [
-                  Expanded(
-                    child: _DataMetric(
-                      value: '${widget.store.events.length}',
-                      label: 'Lịch',
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _DataMetric(
+                          value: '${widget.store.events.length}',
+                          label: 'Lịch',
+                        ),
+                      ),
+                      Expanded(
+                        child: _DataMetric(
+                          value: '${widget.store.reminders.length}',
+                          label: 'Nhắc hẹn',
+                        ),
+                      ),
+                      Expanded(
+                        child: _DataMetric(
+                          value: '${widget.store.goals.length}',
+                          label: 'Mục tiêu',
+                        ),
+                      ),
+                    ],
                   ),
-                  Expanded(
-                    child: _DataMetric(
-                      value: '${widget.store.reminders.length}',
-                      label: 'Nhắc hẹn',
-                    ),
-                  ),
-                  Expanded(
-                    child: _DataMetric(
-                      value: '${widget.store.goals.length}',
-                      label: 'Mục tiêu',
-                    ),
+                  const SizedBox(height: 14),
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.lock_outline_rounded,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Dữ liệu được lưu cục bộ trên thiết bị.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -446,7 +567,7 @@ class _SettingsPageState extends State<SettingsPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Light Coin 1.1.0',
+                  'Light Coin 2.0.0',
                   style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
                 ),
                 SizedBox(height: 6),
@@ -568,53 +689,72 @@ class _Tile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.accent,
+    this.onTap,
+    this.trailing,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final Color accent;
+  final VoidCallback? onTap;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: .11),
-                borderRadius: BorderRadius.circular(15),
-              ),
-              child: Icon(icon, color: accent, size: 21),
+    final content = Padding(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: .11),
+              borderRadius: BorderRadius.circular(15),
             ),
-            const SizedBox(width: 13),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
+            child: Icon(icon, color: accent, size: 21),
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 12,
-                      height: 1.35,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
+          if (trailing != null) ...[
+            const SizedBox(width: 10),
+            trailing!,
           ],
-        ),
+        ],
       ),
+    );
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: onTap == null
+          ? content
+          : InkWell(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onTap!();
+              },
+              child: content,
+            ),
     );
   }
 }
@@ -639,7 +779,10 @@ class _Empty extends StatelessWidget {
         color: Theme.of(context).cardTheme.color,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .35),
+          color: Theme.of(context)
+              .colorScheme
+              .outlineVariant
+              .withValues(alpha: .35),
         ),
       ),
       child: Column(
