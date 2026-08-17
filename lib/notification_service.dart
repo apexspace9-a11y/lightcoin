@@ -1,3 +1,5 @@
+import 'dart:ui' show Color;
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest.dart' as tz;
@@ -16,19 +18,30 @@ class NotificationService {
       final zone = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(zone.identifier));
     } catch (_) {}
-    const settings = InitializationSettings(android: AndroidInitializationSettings('ic_notification'));
+    const settings = InitializationSettings(
+      android: AndroidInitializationSettings('ic_notification'),
+    );
     await _plugin.initialize(settings: settings);
-    final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     await android?.requestNotificationsPermission();
     _ready = true;
   }
 
-  Future<void> schedule({required int id, required String title, required String body, required DateTime at}) async {
+  Future<void> schedule({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime at,
+  }) async {
     await init();
     if (!at.isAfter(DateTime.now())) return;
-    final android = _plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     final exact = await android?.requestExactAlarmsPermission() ?? false;
-    const details = NotificationDetails(
+
+    final details = NotificationDetails(
       android: AndroidNotificationDetails(
         'lightcoin_reminders',
         'Nhắc hẹn Light Coin',
@@ -36,18 +49,24 @@ class NotificationService {
         importance: Importance.max,
         priority: Priority.high,
         category: AndroidNotificationCategory.reminder,
-        styleInformation: BigTextStyleInformation(''),
+        styleInformation: BigTextStyleInformation(body),
         ticker: 'Light Coin',
         icon: 'ic_notification',
+        color: const Color(0xFF6D5DFB),
+        enableVibration: true,
+        playSound: true,
       ),
     );
+
     await _plugin.zonedSchedule(
       id: id,
       title: title,
       body: body,
       scheduledDate: tz.TZDateTime.from(at, tz.local),
       notificationDetails: details,
-      androidScheduleMode: exact ? AndroidScheduleMode.exactAllowWhileIdle : AndroidScheduleMode.inexactAllowWhileIdle,
+      androidScheduleMode: exact
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
       payload: 'lightcoin:$id',
     );
   }
@@ -59,7 +78,27 @@ class NotificationService {
 
   Future<void> test() async {
     await init();
-    const details = NotificationDetails(android: AndroidNotificationDetails('lightcoin_reminders', 'Nhắc hẹn Light Coin', channelDescription: 'Lịch hẹn, công việc và mục tiêu quan trọng', importance: Importance.max, priority: Priority.high, styleInformation: BigTextStyleInformation('Thông báo của bạn đã sẵn sàng.'), icon: 'ic_notification'));
-    await _plugin.show(id: 991001, title: 'Light Coin', body: 'Thông báo của bạn đã sẵn sàng ✨', notificationDetails: details);
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'lightcoin_reminders',
+        'Nhắc hẹn Light Coin',
+        channelDescription: 'Lịch hẹn, công việc và mục tiêu quan trọng',
+        importance: Importance.max,
+        priority: Priority.high,
+        category: AndroidNotificationCategory.reminder,
+        styleInformation:
+            BigTextStyleInformation('Thông báo của bạn đã sẵn sàng.'),
+        icon: 'ic_notification',
+        color: Color(0xFF6D5DFB),
+        enableVibration: true,
+        playSound: true,
+      ),
+    );
+    await _plugin.show(
+      id: 991001,
+      title: 'Light Coin',
+      body: 'Thông báo của bạn đã sẵn sàng ✨',
+      notificationDetails: details,
+    );
   }
 }
