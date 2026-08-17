@@ -18,7 +18,7 @@ class NotificationService {
       final zone = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(zone.identifier));
     } catch (_) {
-      // tz.local safely falls back when a device timezone cannot be resolved.
+      // Keep the package fallback timezone when a device timezone cannot be resolved.
     }
 
     const android = AndroidInitializationSettings('app_icon');
@@ -46,7 +46,7 @@ class NotificationService {
       android: AndroidNotificationDetails(
         'daily_saving',
         'Nhắc tiết kiệm',
-        channelDescription: 'Nhắc ghi chép và kiểm tra kế hoạch chi tiêu mỗi ngày',
+        channelDescription: 'Nhắc duy trì thói quen bỏ tiền vào hũ mỗi ngày',
         importance: Importance.defaultImportance,
         priority: Priority.defaultPriority,
         icon: 'app_icon',
@@ -55,8 +55,8 @@ class NotificationService {
 
     await _plugin.zonedSchedule(
       id: _dailyId,
-      title: 'Một phút cho ví tiền',
-      body: 'Ghi lại chi tiêu hôm nay và xem bạn còn bao nhiêu để chi an toàn.',
+      title: 'Đến giờ bỏ ống',
+      body: 'Một khoản nhỏ hôm nay vẫn đưa bạn gần mục tiêu hơn ngày hôm qua.',
       scheduledDate: next,
       notificationDetails: details,
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
@@ -66,14 +66,14 @@ class NotificationService {
 
   Future<void> cancelDailyReminder() => _plugin.cancel(id: _dailyId);
 
-  Future<void> showBudgetAlert({required String title, required String body}) async {
+  Future<void> showSavingsAlert({required String title, required String body}) async {
     final allowed = await requestPermission();
     if (!allowed) return;
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
-        'budget_alerts',
-        'Cảnh báo ngân sách',
-        channelDescription: 'Cảnh báo khi chi tiêu tiến gần hoặc vượt ngân sách',
+        'saving_milestones',
+        'Cột mốc tiết kiệm',
+        channelDescription: 'Thông báo khi hoàn thành hũ hoặc thử thách tiết kiệm',
         importance: Importance.high,
         priority: Priority.high,
         icon: 'app_icon',
