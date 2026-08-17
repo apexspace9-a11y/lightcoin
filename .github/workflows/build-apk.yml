@@ -1,4 +1,4 @@
-name: Build Light Coin APK
+name: Build Android APK
 
 on:
   push:
@@ -11,190 +11,48 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Flutter stable
-        shell: bash
-        run: |
-          git clone https://github.com/flutter/flutter.git --depth 1 --branch stable "$RUNNER_TEMP/flutter"
-          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
 
-      - name: Create Android project
-        shell: bash
-        run: |
-          cp -R lib "$RUNNER_TEMP/lightcoin_lib"
-          cp pubspec.yaml "$RUNNER_TEMP/pubspec.yaml"
-          cp analysis_options.yaml "$RUNNER_TEMP/analysis_options.yaml"
-          flutter config --no-analytics
-          flutter create . --platforms=android --org com.lightcoin --project-name light_coin
-          rm -rf lib test
-          cp -R "$RUNNER_TEMP/lightcoin_lib" lib
-          cp "$RUNNER_TEMP/pubspec.yaml" pubspec.yaml
-          cp "$RUNNER_TEMP/analysis_options.yaml" analysis_options.yaml
-          flutter pub get
+      - name: Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
 
-      - name: Configure Android experience
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
+      - name: Generate Gradle wrapper
+        run: gradle -p android wrapper --gradle-version 8.13
 
-          p = Path('android/app/build.gradle.kts')
-          s = p.read_text()
-          s = s.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
-          s = s.replace('minSdk = flutter.minSdkVersion', 'minSdk = 24')
-          s = s.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 36')
-          marker = 'compileOptions {'
-          if 'isCoreLibraryDesugaringEnabled = true' not in s:
-              s = s.replace(marker, marker + '\n        isCoreLibraryDesugaringEnabled = true', 1)
-          if 'multiDexEnabled = true' not in s:
-              s = s.replace('defaultConfig {', 'defaultConfig {\n        multiDexEnabled = true', 1)
-          if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' not in s:
-              s += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
-          p.write_text(s)
+      - name: Install packages
+        run: flutter pub get
 
-          m = Path('android/app/src/main/AndroidManifest.xml')
-          x = m.read_text()
-          perms = '''    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n'''
-          x = x.replace(
-              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
-              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n' + perms,
-          )
-          x = x.replace('android:label="light_coin"', 'android:label="Light Coin"')
-          x = x.replace(
-              'android:icon="@mipmap/ic_launcher"',
-              'android:icon="@drawable/ic_launcher_lightcoin"\n        android:roundIcon="@drawable/ic_launcher_lightcoin"\n        android:allowBackup="false"',
-          )
-          receivers = '''\n        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n            <intent-filter>\n                <action android:name="android.intent.action.BOOT_COMPLETED"/>\n                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>\n                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>\n                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>\n            </intent-filter>\n        </receiver>\n'''
-          x = x.replace(
-              '        <meta-data\n            android:name="flutterEmbedding"\n            android:value="2" />',
-              '        <meta-data\n            android:name="flutterEmbedding"\n            android:value="2" />' + receivers,
-          )
-          m.write_text(x)
-          PY
-
-          cat > android/app/src/main/kotlin/com/lightcoin/light_coin/MainActivity.kt <<'KOTLIN'
-          package com.lightcoin.light_coin
-
-          import android.content.Intent
-          import android.net.Uri
-          import android.os.Build
-          import android.provider.Settings
-          import io.flutter.embedding.android.FlutterActivity
-          import io.flutter.embedding.engine.FlutterEngine
-          import io.flutter.plugin.common.MethodChannel
-
-          class MainActivity : FlutterActivity() {
-              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-                  super.configureFlutterEngine(flutterEngine)
-                  MethodChannel(
-                      flutterEngine.dartExecutor.binaryMessenger,
-                      "lightcoin/system"
-                  ).setMethodCallHandler { call, result ->
-                      when (call.method) {
-                          "openNotificationSettings" -> {
-                              try {
-                                  val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                      Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                          putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                                      }
-                                  } else {
-                                      Intent(
-                                          Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                          Uri.parse("package:$packageName")
-                                      )
-                                  }
-                                  startActivity(intent)
-                                  result.success(true)
-                              } catch (_: Exception) {
-                                  result.success(false)
-                              }
-                          }
-                          else -> result.notImplemented()
-                      }
-                  }
-              }
-          }
-          KOTLIN
-
-          cat > android/app/src/main/res/drawable/ic_notification.xml <<'XML'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-            <path android:fillColor="#FFFFFFFF" android:pathData="M12,2A10,10 0,1 0,12 22A10,10 0,0 0,12 2M13,6V11H17L11,18V13H7L13,6Z"/>
-          </vector>
-          XML
-
-          cat > android/app/src/main/res/drawable/ic_launcher_lightcoin.xml <<'XML'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-            <path android:fillColor="#6D5DFB" android:pathData="M54,4A50,50 0,1 0,54 104A50,50 0,0 0,54 4Z"/>
-            <path android:fillColor="#39D3B4" android:pathData="M54,13A41,41 0,1 0,54 95A41,41 0,0 0,54 13Z"/>
-            <path android:fillColor="#FFFFFFFF" android:pathData="M61,27L39,57H52L47,82L70,50H57L61,27Z"/>
-          </vector>
-          XML
-
-          cat > android/app/src/main/res/values/colors.xml <<'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-            <color name="lightcoin_launch">#6D5DFB</color>
-            <color name="lightcoin_surface">#F8F8FC</color>
-            <color name="lightcoin_surface_dark">#11101A</color>
-          </resources>
-          XML
-
-          for dir in drawable drawable-v21; do
-            cat > "android/app/src/main/res/$dir/launch_background.xml" <<'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-            <item android:drawable="@color/lightcoin_launch" />
-            <item android:gravity="center" android:drawable="@drawable/ic_launcher_lightcoin" />
-          </layer-list>
-          XML
-          done
-
-          mkdir -p android/app/src/main/res/values-v31
-          cat > android/app/src/main/res/values-v31/styles.xml <<'XML'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-            <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
-              <item name="android:forceDarkAllowed">false</item>
-              <item name="android:windowFullscreen">false</item>
-              <item name="android:windowSplashScreenBackground">@color/lightcoin_launch</item>
-              <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_lightcoin</item>
-              <item name="android:windowSplashScreenIconBackgroundColor">@color/lightcoin_launch</item>
-              <item name="android:windowSplashScreenAnimationDuration">100</item>
-              <item name="android:windowBackground">@drawable/launch_background</item>
-            </style>
-            <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-              <item name="android:windowLightStatusBar">true</item>
-              <item name="android:windowBackground">@color/lightcoin_surface</item>
-            </style>
-          </resources>
-          XML
-
-      - name: Check Dart
+      - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build release APK
         run: flutter build apk --release
 
-      - name: Prepare final APK
-        run: |
-          cp build/app/outputs/flutter-apk/app-release.apk LightCoin-2.0.0.apk
-          sha256sum LightCoin-2.0.0.apk > LightCoin-2.0.0.sha256
+      - name: Rename APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Tiet-Kiem-1.0.0.apk
 
-      - name: Upload final APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LightCoin-Final-2.0.0
-          path: |
-            LightCoin-2.0.0.apk
-            LightCoin-2.0.0.sha256
+          name: Tiet-Kiem-1.0.0
+          path: build/app/outputs/flutter-apk/Tiet-Kiem-1.0.0.apk
           if-no-files-found: error
           retention-days: 30

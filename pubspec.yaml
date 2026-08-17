@@ -1,25 +1,26 @@
-name: light_coin
-description: Light Coin - lịch, tiết kiệm và nhắc hẹn cá nhân.
-publish_to: 'none'
-version: 2.0.0+4
+name: lightdev
+description: Smart personal money saving app.
+publish_to: "none"
+version: 1.0.0+1
 
 environment:
-  sdk: '>=3.10.0 <4.0.0'
+  sdk: ">=3.10.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  flutter_local_notifications: 22.2.0
-  flutter_timezone: 5.1.0
-  intl: 0.20.3
-  shared_preferences: 2.5.5
-  table_calendar: 3.2.0
-  timezone: 0.11.1
+  intl: ^0.20.3
+  path: ^1.9.1
+  shared_preferences: ^2.5.5
+  sqflite: ^2.4.2+1
+  flutter_local_notifications: ^22.3.0
+  flutter_timezone: ^5.1.0
+  timezone: ^0.11.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: 6.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
