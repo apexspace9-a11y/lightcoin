@@ -61,13 +61,15 @@ Future<void> _showEventForm(
   BuildContext context,
   AppStore store, {
   DateTime? initial,
+  CalendarItem? editing,
 }) async {
-  final title = TextEditingController();
-  final note = TextEditingController();
-  DateTime when = _suggestedDateTime(day: initial);
-  String category = 'Cá nhân';
-  bool remind = true;
+  final title = TextEditingController(text: editing?.title ?? '');
+  final note = TextEditingController(text: editing?.note ?? '');
+  DateTime when = editing?.dateTime ?? _suggestedDateTime(day: initial);
+  String category = editing?.category ?? 'Cá nhân';
+  bool remind = editing?.remind ?? true;
   bool saving = false;
+  final isEditing = editing != null;
 
   await showModalBottomSheet(
     context: context,
@@ -79,14 +81,14 @@ Future<void> _showEventForm(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Tạo lịch mới',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+            Text(
+              isEditing ? 'Chỉnh sửa lịch' : 'Tạo lịch mới',
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 18),
             TextField(
               controller: title,
-              autofocus: true,
+              autofocus: !isEditing,
               textCapitalization: TextCapitalization.sentences,
               textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
@@ -161,25 +163,29 @@ Future<void> _showEventForm(
                         }
 
                         setSheetState(() => saving = true);
-                        final notificationReady = await store.addEvent(
-                          CalendarItem(
-                            id: store.nextId(),
-                            title: cleanTitle,
-                            dateTime: when,
-                            note: note.text.trim(),
-                            category: category,
-                            remind: remind,
-                          ),
+                        final item = CalendarItem(
+                          id: editing?.id ?? store.nextId(),
+                          title: cleanTitle,
+                          dateTime: when,
+                          note: note.text.trim(),
+                          category: category,
+                          remind: remind,
                         );
+                        final notificationReady = isEditing
+                            ? await store.updateEvent(item)
+                            : await store.addEvent(item);
 
                         if (sheetContext.mounted) Navigator.pop(sheetContext);
                         if (remind && !notificationReady && context.mounted) {
                           await _showNotificationBlocked(context);
                         }
                       },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Text(saving ? 'Đang lưu...' : 'Lưu lịch'),
+                child: Text(
+                  saving
+                      ? 'Đang lưu...'
+                      : isEditing
+                          ? 'Lưu thay đổi'
+                          : 'Lưu lịch',
                 ),
               ),
             ),
@@ -193,12 +199,22 @@ Future<void> _showEventForm(
   note.dispose();
 }
 
-Future<void> _showGoalForm(BuildContext context, AppStore store) async {
-  final name = TextEditingController();
-  final target = TextEditingController();
-  final current = TextEditingController(text: '0');
-  DateTime deadline = DateTime.now().add(const Duration(days: 90));
+Future<void> _showGoalForm(
+  BuildContext context,
+  AppStore store, {
+  SavingGoal? editing,
+}) async {
+  final name = TextEditingController(text: editing?.name ?? '');
+  final target = TextEditingController(
+    text: editing == null ? '' : editing.target.toStringAsFixed(0),
+  );
+  final current = TextEditingController(
+    text: editing == null ? '0' : editing.current.toStringAsFixed(0),
+  );
+  DateTime deadline =
+      editing?.deadline ?? DateTime.now().add(const Duration(days: 90));
   bool saving = false;
+  final isEditing = editing != null;
 
   await showModalBottomSheet(
     context: context,
@@ -210,14 +226,14 @@ Future<void> _showGoalForm(BuildContext context, AppStore store) async {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Mục tiêu tiết kiệm',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+            Text(
+              isEditing ? 'Chỉnh sửa mục tiêu' : 'Mục tiêu tiết kiệm',
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 18),
             TextField(
               controller: name,
-              autofocus: true,
+              autofocus: !isEditing,
               textCapitalization: TextCapitalization.sentences,
               textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
@@ -243,7 +259,7 @@ Future<void> _showGoalForm(BuildContext context, AppStore store) async {
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: const InputDecoration(
-                labelText: 'Đã có',
+                labelText: 'Đã tích lũy',
                 prefixIcon: Icon(Icons.savings_rounded),
                 suffixText: '₫',
               ),
@@ -253,10 +269,12 @@ Future<void> _showGoalForm(BuildContext context, AppStore store) async {
               icon: Icons.event_rounded,
               label: 'Hạn ${_day.format(deadline)}',
               onTap: () async {
+                final today = DateTime.now();
+                final initialDate = deadline.isBefore(today) ? today : deadline;
                 final date = await showDatePicker(
                   context: sheetContext,
-                  initialDate: deadline,
-                  firstDate: DateTime.now(),
+                  initialDate: initialDate,
+                  firstDate: DateTime(today.year, today.month, today.day),
                   lastDate: DateTime(2035),
                 );
                 if (date != null) setSheetState(() => deadline = date);
@@ -286,20 +304,27 @@ Future<void> _showGoalForm(BuildContext context, AppStore store) async {
                         }
 
                         setSheetState(() => saving = true);
-                        await store.addGoal(
-                          SavingGoal(
-                            id: store.nextId(),
-                            name: cleanName,
-                            target: targetValue,
-                            current: currentValue
-                                .clamp(0.0, targetValue)
-                                .toDouble(),
-                            deadline: deadline,
-                          ),
+                        final goal = SavingGoal(
+                          id: editing?.id ?? store.nextId(),
+                          name: cleanName,
+                          target: targetValue,
+                          current: currentValue.clamp(0.0, targetValue).toDouble(),
+                          deadline: deadline,
                         );
+                        if (isEditing) {
+                          await store.updateGoal(goal);
+                        } else {
+                          await store.addGoal(goal);
+                        }
                         if (sheetContext.mounted) Navigator.pop(sheetContext);
                       },
-                child: Text(saving ? 'Đang tạo...' : 'Tạo mục tiêu'),
+                child: Text(
+                  saving
+                      ? 'Đang lưu...'
+                      : isEditing
+                          ? 'Lưu thay đổi'
+                          : 'Tạo mục tiêu',
+                ),
               ),
             ),
           ],
@@ -319,50 +344,65 @@ Future<void> _showAddMoney(
   SavingGoal goal,
 ) async {
   final controller = TextEditingController();
+  bool saving = false;
 
   await showDialog(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: Text('Nạp vào ${goal.name}'),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        decoration: const InputDecoration(
-          labelText: 'Số tiền',
-          suffixText: '₫',
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) => AlertDialog(
+        title: Text('Nạp vào ${goal.name}'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(
+            labelText: 'Số tiền',
+            suffixText: '₫',
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: saving ? null : () => Navigator.pop(dialogContext),
+            child: const Text('Hủy'),
+          ),
+          FilledButton(
+            onPressed: saving
+                ? null
+                : () async {
+                    final value = double.tryParse(controller.text) ?? 0;
+                    if (value <= 0) {
+                      _formMessage(
+                        dialogContext,
+                        'Vui lòng nhập số tiền hợp lệ.',
+                      );
+                      return;
+                    }
+                    setDialogState(() => saving = true);
+                    await store.addMoney(goal.id, value);
+                    if (dialogContext.mounted) Navigator.pop(dialogContext);
+                  },
+            child: Text(saving ? 'Đang nạp...' : 'Nạp'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: const Text('Hủy'),
-        ),
-        FilledButton(
-          onPressed: () async {
-            final value = double.tryParse(controller.text) ?? 0;
-            if (value <= 0) {
-              _formMessage(dialogContext, 'Vui lòng nhập số tiền hợp lệ.');
-              return;
-            }
-            await store.addMoney(goal.id, value);
-            if (dialogContext.mounted) Navigator.pop(dialogContext);
-          },
-          child: const Text('Nạp'),
-        ),
-      ],
     ),
   );
 
   controller.dispose();
 }
 
-Future<void> _showReminderForm(BuildContext context, AppStore store) async {
-  final title = TextEditingController();
-  final note = TextEditingController();
-  DateTime when = _suggestedDateTime();
+Future<void> _showReminderForm(
+  BuildContext context,
+  AppStore store, {
+  ReminderItem? editing,
+}) async {
+  final title = TextEditingController(text: editing?.title ?? '');
+  final note = TextEditingController(text: editing?.note ?? '');
+  DateTime when = editing?.dateTime ?? _suggestedDateTime();
+  bool enabled = editing?.enabled ?? true;
   bool saving = false;
+  final isEditing = editing != null;
 
   await showModalBottomSheet(
     context: context,
@@ -374,14 +414,14 @@ Future<void> _showReminderForm(BuildContext context, AppStore store) async {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Nhắc hẹn mới',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+            Text(
+              isEditing ? 'Chỉnh sửa nhắc hẹn' : 'Nhắc hẹn mới',
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 18),
             TextField(
               controller: title,
-              autofocus: true,
+              autofocus: !isEditing,
               textCapitalization: TextCapitalization.sentences,
               textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
@@ -408,7 +448,14 @@ Future<void> _showReminderForm(BuildContext context, AppStore store) async {
                 if (value != null) setSheetState(() => when = value);
               },
             ),
-            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Bật nhắc hẹn'),
+              subtitle: const Text('Gửi notification khi đến giờ'),
+              value: enabled,
+              onChanged: (value) => setSheetState(() => enabled = value),
+            ),
+            const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: FilledButton(
@@ -417,7 +464,10 @@ Future<void> _showReminderForm(BuildContext context, AppStore store) async {
                     : () async {
                         final cleanTitle = title.text.trim();
                         if (cleanTitle.isEmpty) {
-                          _formMessage(sheetContext, 'Vui lòng nhập nội dung nhắc hẹn.');
+                          _formMessage(
+                            sheetContext,
+                            'Vui lòng nhập nội dung nhắc hẹn.',
+                          );
                           return;
                         }
                         if (!when.isAfter(DateTime.now())) {
@@ -429,20 +479,29 @@ Future<void> _showReminderForm(BuildContext context, AppStore store) async {
                         }
 
                         setSheetState(() => saving = true);
-                        final notificationReady = await store.addReminder(
-                          ReminderItem(
-                            id: store.nextId(),
-                            title: cleanTitle,
-                            dateTime: when,
-                            note: note.text.trim(),
-                          ),
+                        final reminder = ReminderItem(
+                          id: editing?.id ?? store.nextId(),
+                          title: cleanTitle,
+                          dateTime: when,
+                          note: note.text.trim(),
+                          done: editing?.done ?? false,
+                          enabled: enabled,
                         );
+                        final notificationReady = isEditing
+                            ? await store.updateReminder(reminder)
+                            : await store.addReminder(reminder);
                         if (sheetContext.mounted) Navigator.pop(sheetContext);
-                        if (!notificationReady && context.mounted) {
+                        if (enabled && !notificationReady && context.mounted) {
                           await _showNotificationBlocked(context);
                         }
                       },
-                child: Text(saving ? 'Đang lưu...' : 'Lưu nhắc hẹn'),
+                child: Text(
+                  saving
+                      ? 'Đang lưu...'
+                      : isEditing
+                          ? 'Lưu thay đổi'
+                          : 'Lưu nhắc hẹn',
+                ),
               ),
             ),
           ],
