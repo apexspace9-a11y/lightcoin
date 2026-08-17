@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -46,6 +46,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           p = Path('android/app/build.gradle.kts')
           s = p.read_text()
           s = s.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
@@ -63,11 +64,20 @@ jobs:
           m = Path('android/app/src/main/AndroidManifest.xml')
           x = m.read_text()
           perms = '''    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n'''
-          x = x.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">', '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n' + perms)
+          x = x.replace(
+              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n' + perms,
+          )
           x = x.replace('android:label="light_coin"', 'android:label="Light Coin"')
-          x = x.replace('android:icon="@mipmap/ic_launcher"', 'android:icon="@drawable/ic_launcher_lightcoin"\n        android:roundIcon="@drawable/ic_launcher_lightcoin"')
+          x = x.replace(
+              'android:icon="@mipmap/ic_launcher"',
+              'android:icon="@drawable/ic_launcher_lightcoin"\n        android:roundIcon="@drawable/ic_launcher_lightcoin"',
+          )
           receivers = '''\n        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n            <intent-filter>\n                <action android:name="android.intent.action.BOOT_COMPLETED"/>\n                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>\n                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>\n                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>\n            </intent-filter>\n        </receiver>\n'''
-          x = x.replace('        <meta-data\n            android:name="flutterEmbedding"\n            android:value="2" />', '        <meta-data\n            android:name="flutterEmbedding"\n            android:value="2" />' + receivers)
+          x = x.replace(
+              '        <meta-data\n            android:name="flutterEmbedding"\n            android:value="2" />',
+              '        <meta-data\n            android:name="flutterEmbedding"\n            android:value="2" />' + receivers,
+          )
           m.write_text(x)
           PY
 
@@ -83,6 +93,45 @@ jobs:
             <path android:fillColor="#39D3B4" android:pathData="M54,13A41,41 0,1 0,54 95A41,41 0,0 0,54 13Z"/>
             <path android:fillColor="#FFFFFFFF" android:pathData="M61,27L39,57H52L47,82L70,50H57L61,27Z"/>
           </vector>
+          XML
+
+          cat > android/app/src/main/res/values/colors.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <color name="lightcoin_launch">#6D5DFB</color>
+            <color name="lightcoin_surface">#F8F8FC</color>
+            <color name="lightcoin_surface_dark">#11101A</color>
+          </resources>
+          XML
+
+          for dir in drawable drawable-v21; do
+            cat > "android/app/src/main/res/$dir/launch_background.xml" <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+            <item android:drawable="@color/lightcoin_launch" />
+            <item android:gravity="center" android:drawable="@drawable/ic_launcher_lightcoin" />
+          </layer-list>
+          XML
+          done
+
+          mkdir -p android/app/src/main/res/values-v31
+          cat > android/app/src/main/res/values-v31/styles.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+              <item name="android:forceDarkAllowed">false</item>
+              <item name="android:windowFullscreen">false</item>
+              <item name="android:windowSplashScreenBackground">@color/lightcoin_launch</item>
+              <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_lightcoin</item>
+              <item name="android:windowSplashScreenIconBackgroundColor">@color/lightcoin_launch</item>
+              <item name="android:windowSplashScreenAnimationDuration">100</item>
+              <item name="android:windowBackground">@drawable/launch_background</item>
+            </style>
+            <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+              <item name="android:windowLightStatusBar">true</item>
+              <item name="android:windowBackground">@color/lightcoin_surface</item>
+            </style>
+          </resources>
           XML
 
       - name: Check Dart
