@@ -1,200 +1,224 @@
 import 'package:flutter/material.dart';
 
-import '../../models.dart';
 import '../../state/money_store.dart';
 import '../widgets.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.store});
+
   final MoneyStore store;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Cài đặt', style: TextStyle(fontWeight: FontWeight.w900))),
-        body: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
-          children: [
-            const SectionTitle('Kế hoạch chi tiêu'),
-            const SizedBox(height: 10),
-            Card(
-              child: Column(
-                children: [
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
+        children: [
+          Text(
+            'Cài đặt',
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -.8,
+                ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            'Chỉnh nhịp tiết kiệm theo cách phù hợp với bạn.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 24),
+          const SectionTitle('Kế hoạch tiết kiệm'),
+          const SizedBox(height: 10),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  contentPadding: const EdgeInsets.fromLTRB(16, 10, 10, 8),
+                  leading: _SettingIcon(icon: Icons.track_changes_rounded, color: scheme.primaryContainer),
+                  title: const Text('Mục tiêu mỗi ngày', style: TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: Text(
+                    store.dailyTarget > 0
+                        ? formatMoney(store.dailyTarget, store.currency)
+                        : store.suggestedDailySaving > 0
+                            ? 'Tự tính: ${formatMoney(store.suggestedDailySaving, store.currency)}'
+                            : 'Tự động theo các hũ',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _showDailyTarget(context),
+                ),
+                const Divider(height: 1, indent: 78),
+                SwitchListTile(
+                  contentPadding: const EdgeInsets.fromLTRB(16, 8, 10, 8),
+                  secondary: _SettingIcon(icon: Icons.notifications_active_rounded, color: scheme.secondaryContainer),
+                  title: const Text('Nhắc tiết kiệm mỗi ngày', style: TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: Text(
+                    store.dailyReminder
+                        ? '${store.reminderHour.toString().padLeft(2, '0')}:${store.reminderMinute.toString().padLeft(2, '0')}'
+                        : 'Đang tắt',
+                  ),
+                  value: store.dailyReminder,
+                  onChanged: (value) => store.setReminder(enabled: value),
+                ),
+                if (store.dailyReminder) ...[
+                  const Divider(height: 1, indent: 78),
                   ListTile(
-                    leading: const Icon(Icons.account_balance_wallet_rounded),
-                    title: const Text('Ngân sách tháng'),
-                    subtitle: Text(store.monthlyBudget <= 0 ? 'Chưa đặt' : formatMoney(store.monthlyBudget, store.currency)),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => _editMonthlyBudget(context),
-                  ),
-                  const Divider(height: 1, indent: 56),
-                  ListTile(
-                    leading: const Icon(Icons.category_rounded),
-                    title: const Text('Ngân sách theo danh mục'),
-                    subtitle: Text('${store.categoryBudgets.length} danh mục đang áp dụng'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => _editCategoryBudgets(context),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            const SectionTitle('Nhắc nhở'),
-            const SizedBox(height: 10),
-            Card(
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    secondary: const Icon(Icons.notifications_active_rounded),
-                    title: const Text('Nhắc ghi chép mỗi ngày'),
-                    subtitle: Text('Lúc ${_timeText(store.reminderHour, store.reminderMinute)}'),
-                    value: store.dailyReminder,
-                    onChanged: (value) => store.setReminder(enabled: value),
-                  ),
-                  if (store.dailyReminder)
-                    ListTile(
-                      leading: const Icon(Icons.schedule_rounded),
-                      title: const Text('Giờ nhắc'),
-                      trailing: Text(_timeText(store.reminderHour, store.reminderMinute), style: const TextStyle(fontWeight: FontWeight.w800)),
-                      onTap: () => _pickReminderTime(context),
+                    contentPadding: const EdgeInsets.fromLTRB(78, 4, 10, 4),
+                    title: const Text('Giờ nhắc'),
+                    trailing: Text(
+                      '${store.reminderHour.toString().padLeft(2, '0')}:${store.reminderMinute.toString().padLeft(2, '0')}',
+                      style: TextStyle(fontWeight: FontWeight.w900, color: scheme.primary),
                     ),
+                    onTap: () => _pickReminderTime(context),
+                  ),
                 ],
-              ),
+              ],
             ),
-            const SizedBox(height: 24),
-            const SectionTitle('Hiển thị'),
-            const SizedBox(height: 10),
-            Card(
+          ),
+          const SizedBox(height: 24),
+          const SectionTitle('Hiển thị'),
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ListTile(
-                    leading: const Icon(Icons.currency_exchange_rounded),
-                    title: const Text('Đơn vị tiền'),
-                    trailing: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
+                  Row(
+                    children: [
+                      _SettingIcon(icon: Icons.payments_rounded, color: scheme.tertiaryContainer),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text('Đơn vị tiền', style: TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                      DropdownButton<String>(
                         value: store.currency,
-                        items: const ['VND', 'USD', 'EUR', 'JPY', 'KRW', 'CNY', 'THB', 'SGD']
-                            .map((item) => DropdownMenuItem(value: item, child: Text(item)))
-                            .toList(),
+                        underline: const SizedBox.shrink(),
+                        items: const [
+                          DropdownMenuItem(value: 'VND', child: Text('VND')),
+                          DropdownMenuItem(value: 'USD', child: Text('USD')),
+                          DropdownMenuItem(value: 'EUR', child: Text('EUR')),
+                          DropdownMenuItem(value: 'JPY', child: Text('JPY')),
+                          DropdownMenuItem(value: 'KRW', child: Text('KRW')),
+                          DropdownMenuItem(value: 'CNY', child: Text('CNY')),
+                          DropdownMenuItem(value: 'THB', child: Text('THB')),
+                          DropdownMenuItem(value: 'SGD', child: Text('SGD')),
+                        ],
                         onChanged: (value) {
                           if (value != null) store.setCurrency(value);
                         },
                       ),
-                    ),
+                    ],
                   ),
-                  const Divider(height: 1, indent: 56),
-                  ListTile(
-                    leading: const Icon(Icons.palette_rounded),
-                    title: const Text('Giao diện'),
-                    subtitle: const Text('Sáng, tối hoặc theo hệ thống'),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  const SizedBox(height: 18),
+                  const Text('Giao diện', style: TextStyle(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
                     child: SegmentedButton<String>(
                       segments: const [
-                        ButtonSegment(value: 'system', icon: Icon(Icons.brightness_auto_rounded), label: Text('Tự động')),
+                        ButtonSegment(value: 'system', icon: Icon(Icons.brightness_auto_rounded), label: Text('Máy')),
                         ButtonSegment(value: 'light', icon: Icon(Icons.light_mode_rounded), label: Text('Sáng')),
                         ButtonSegment(value: 'dark', icon: Icon(Icons.dark_mode_rounded), label: Text('Tối')),
                       ],
                       selected: {store.theme},
-                      onSelectionChanged: (values) => store.setTheme(values.first),
+                      onSelectionChanged: (value) => store.setTheme(value.first),
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
-            const SectionTitle('Dữ liệu'),
-            const SizedBox(height: 10),
-            Card(
-              child: ListTile(
-                leading: Icon(Icons.delete_forever_rounded, color: Theme.of(context).colorScheme.error),
-                title: Text('Xóa toàn bộ dữ liệu', style: TextStyle(color: Theme.of(context).colorScheme.error, fontWeight: FontWeight.w800)),
-                subtitle: const Text('Xóa giao dịch, mục tiêu và ngân sách'),
-                onTap: () => _clearData(context),
+          ),
+          const SizedBox(height: 24),
+          const SectionTitle('Dữ liệu'),
+          const SizedBox(height: 10),
+          Card(
+            child: ListTile(
+              contentPadding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
+              leading: _SettingIcon(icon: Icons.delete_sweep_rounded, color: scheme.errorContainer),
+              title: Text(
+                'Xóa toàn bộ dữ liệu tiết kiệm',
+                style: TextStyle(fontWeight: FontWeight.w800, color: scheme.error),
               ),
+              subtitle: const Text('Xóa hũ, lịch sử, thử thách và mục tiêu ngày.'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _confirmClear(context),
             ),
-            const SizedBox(height: 16),
-            Center(child: Text('Tiết Kiệm • 1.0.0', style: Theme.of(context).textTheme.bodySmall)),
-          ],
-        ),
-      );
-
-  String _timeText(int h, int m) => '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-
-  Future<void> _editMonthlyBudget(BuildContext context) async {
-    final controller = TextEditingController(text: store.monthlyBudget > 0 ? store.monthlyBudget.toStringAsFixed(0) : '');
-    final result = await showDialog<double>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Ngân sách tháng'),
-        content: AmountField(controller: controller, currency: store.currency),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
-          TextButton(onPressed: () => Navigator.pop(context, 0.0), child: const Text('Bỏ giới hạn')),
-          FilledButton(
-            onPressed: () {
-              final value = double.tryParse(controller.text.replaceAll(',', '.')) ?? 0;
-              Navigator.pop(context, value);
-            },
-            child: const Text('Lưu'),
           ),
         ],
       ),
     );
-    controller.dispose();
-    if (result != null) await store.setMonthlyBudget(result);
   }
 
-  Future<void> _editCategoryBudgets(BuildContext context) async {
-    await showModalBottomSheet<void>(
+  Future<void> _showDailyTarget(BuildContext context) async {
+    final controller = TextEditingController(
+      text: store.dailyTarget > 0 ? store.dailyTarget.toStringAsFixed(store.currency == 'VND' ? 0 : 2) : '',
+    );
+
+    final result = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: .78,
-        maxChildSize: .92,
-        minChildSize: .45,
-        builder: (context, scrollController) => ListView(
-          controller: scrollController,
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 30),
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          4,
+          20,
+          MediaQuery.viewInsetsOf(sheetContext).bottom + 24,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Ngân sách theo danh mục', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900)),
-            const SizedBox(height: 6),
-            Text('Đặt giới hạn riêng cho từng nhóm chi tiêu quan trọng.', style: Theme.of(context).textTheme.bodyMedium),
+            Text(
+              'Mục tiêu mỗi ngày',
+              style: Theme.of(sheetContext).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              'Đặt một mức cố định hoặc để app tự chia số tiền còn thiếu của các hũ thành nhịp mỗi ngày.',
+              style: Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            AmountField(controller: controller, currency: store.currency),
             const SizedBox(height: 14),
-            ...expenseCategories.map((category) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(category, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text((store.categoryBudgets[category] ?? 0) <= 0 ? 'Không giới hạn' : formatMoney(store.categoryBudgets[category]!, store.currency)),
-                  trailing: const Icon(Icons.edit_rounded),
-                  onTap: () => _editOneCategory(context, category),
-                )),
+            FilledButton(
+              onPressed: () {
+                final value = double.tryParse(controller.text.replaceAll(',', '.')) ?? 0;
+                if (value <= 0) {
+                  ScaffoldMessenger.of(sheetContext).showSnackBar(
+                    const SnackBar(content: Text('Nhập số tiền lớn hơn 0.')),
+                  );
+                  return;
+                }
+                Navigator.pop(sheetContext, 'save');
+              },
+              child: const Padding(
+                padding: EdgeInsets.all(14),
+                child: Text('Dùng mục tiêu này'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () => Navigator.pop(sheetContext, 'auto'),
+              icon: const Icon(Icons.auto_awesome_rounded),
+              label: const Text('Để app tự tính'),
+            ),
           ],
         ),
       ),
     );
-  }
 
-  Future<void> _editOneCategory(BuildContext context, String category) async {
-    final current = store.categoryBudgets[category] ?? 0;
-    final controller = TextEditingController(text: current > 0 ? current.toStringAsFixed(0) : '');
-    final value = await showDialog<double>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(category),
-        content: AmountField(controller: controller, currency: store.currency),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, 0.0), child: const Text('Bỏ giới hạn')),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, double.tryParse(controller.text.replaceAll(',', '.')) ?? 0),
-            child: const Text('Lưu'),
-          ),
-        ],
-      ),
-    );
+    if (result == 'save') {
+      final value = double.tryParse(controller.text.replaceAll(',', '.')) ?? 0;
+      await store.setDailyTarget(value);
+    } else if (result == 'auto') {
+      await store.setDailyTarget(0);
+    }
     controller.dispose();
-    if (value != null) await store.setCategoryBudget(category, value);
   }
 
   Future<void> _pickReminderTime(BuildContext context) async {
@@ -203,22 +227,42 @@ class SettingsScreen extends StatelessWidget {
       initialTime: TimeOfDay(hour: store.reminderHour, minute: store.reminderMinute),
     );
     if (picked != null) {
-      await store.setReminder(enabled: true, hour: picked.hour, minute: picked.minute);
+      await store.setReminder(
+        enabled: true,
+        hour: picked.hour,
+        minute: picked.minute,
+      );
     }
   }
 
-  Future<void> _clearData(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Xóa toàn bộ dữ liệu?'),
-        content: const Text('Mọi giao dịch, mục tiêu và ngân sách sẽ bị xóa vĩnh viễn trên thiết bị này.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Xóa tất cả')),
-        ],
-      ),
-    );
-    if (confirmed == true) await store.clearEverything();
+  Future<void> _confirmClear(BuildContext context) async {
+    final accepted = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Xóa toàn bộ dữ liệu?'),
+            content: const Text('Các hũ, lịch sử tiết kiệm, thử thách và mục tiêu ngày sẽ bị xóa khỏi thiết bị.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Hủy')),
+              FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Xóa tất cả')),
+            ],
+          ),
+        ) ??
+        false;
+    if (accepted) await store.clearEverything();
   }
+}
+
+class _SettingIcon extends StatelessWidget {
+  const _SettingIcon({required this.icon, required this.color});
+
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(16)),
+        child: Icon(icon),
+      );
 }
