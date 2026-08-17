@@ -23,10 +23,21 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      DashboardScreen(store: widget.store, onAdd: _showAddTransaction),
-      TransactionsScreen(store: widget.store, onAdd: _showAddTransaction),
+      DashboardScreen(
+        store: widget.store,
+        onSave: () => _showSavingSheet(),
+        onOpenGoals: () => setState(() => _index = 1),
+      ),
+      GoalsScreen(
+        store: widget.store,
+        onDeposit: (goal) => _showSavingSheet(goal: goal),
+        onWithdraw: (goal) => _showSavingSheet(goal: goal, withdrawal: true),
+      ),
       AnalyticsScreen(store: widget.store),
-      GoalsScreen(store: widget.store),
+      TransactionsScreen(
+        store: widget.store,
+        onSave: () => _showSavingSheet(),
+      ),
       SettingsScreen(store: widget.store),
     ];
 
@@ -36,115 +47,188 @@ class _AppShellState extends State<AppShell> {
         selectedIndex: _index,
         onDestinationSelected: (value) => setState(() => _index = value),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Tổng quan'),
-          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long_rounded), label: 'Giao dịch'),
-          NavigationDestination(icon: Icon(Icons.insights_outlined), selectedIcon: Icon(Icons.insights_rounded), label: 'Phân tích'),
-          NavigationDestination(icon: Icon(Icons.flag_outlined), selectedIcon: Icon(Icons.flag_rounded), label: 'Mục tiêu'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings_rounded), label: 'Cài đặt'),
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'Hôm nay',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.savings_outlined),
+            selectedIcon: Icon(Icons.savings_rounded),
+            label: 'Hũ',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.local_fire_department_outlined),
+            selectedIcon: Icon(Icons.local_fire_department_rounded),
+            label: 'Thử thách',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.history_rounded),
+            selectedIcon: Icon(Icons.history_toggle_off_rounded),
+            label: 'Lịch sử',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.tune_outlined),
+            selectedIcon: Icon(Icons.tune_rounded),
+            label: 'Cài đặt',
+          ),
         ],
       ),
     );
   }
 
-  Future<void> _showAddTransaction() async {
+  Future<void> _showSavingSheet({SavingGoal? goal, bool withdrawal = false}) async {
     final amount = TextEditingController();
     final note = TextEditingController();
-    var type = 'expense';
-    var category = expenseCategories.first;
+    var action = withdrawal ? 'withdrawal' : 'saving';
+    var selectedGoalId = goal?.id ?? -1;
     var date = DateTime.now();
 
-    final saved = await showModalBottomSheet<bool>(
+    final accepted = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) {
-          final categories = type == 'expense' ? expenseCategories : incomeCategories;
-          return Padding(
-            padding: EdgeInsets.fromLTRB(20, 4, 20, MediaQuery.viewInsetsOf(context).bottom + 24),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('Thêm giao dịch', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900)),
-                  const SizedBox(height: 16),
-                  SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'expense', icon: Icon(Icons.north_east_rounded), label: Text('Khoản chi')),
-                      ButtonSegment(value: 'income', icon: Icon(Icons.south_west_rounded), label: Text('Khoản thu')),
-                    ],
-                    selected: {type},
-                    onSelectionChanged: (values) => setSheetState(() {
-                      type = values.first;
-                      category = type == 'expense' ? expenseCategories.first : incomeCategories.first;
-                    }),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            4,
+            20,
+            MediaQuery.viewInsetsOf(sheetContext).bottom + 24,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  action == 'saving' ? 'Bỏ tiền vào hũ' : 'Rút khỏi hũ',
+                  style: Theme.of(sheetContext).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -.4,
+                      ),
+                ),
+                const SizedBox(height: 16),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(
+                      value: 'saving',
+                      icon: Icon(Icons.add_rounded),
+                      label: Text('Tiết kiệm'),
+                    ),
+                    ButtonSegment(
+                      value: 'withdrawal',
+                      icon: Icon(Icons.output_rounded),
+                      label: Text('Rút bớt'),
+                    ),
+                  ],
+                  selected: {action},
+                  onSelectionChanged: (values) => setSheetState(() => action = values.first),
+                ),
+                const SizedBox(height: 14),
+                AmountField(controller: amount, currency: widget.store.currency),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue: selectedGoalId,
+                  decoration: const InputDecoration(
+                    labelText: 'Hũ nhận tiền',
+                    prefixIcon: Icon(Icons.savings_rounded),
                   ),
-                  const SizedBox(height: 14),
-                  AmountField(controller: amount, currency: widget.store.currency),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: category,
-                    decoration: const InputDecoration(labelText: 'Danh mục', prefixIcon: Icon(Icons.category_rounded)),
-                    items: categories.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
-                    onChanged: (value) {
-                      if (value != null) setSheetState(() => category = value);
-                    },
+                  items: [
+                    const DropdownMenuItem<int>(
+                      value: -1,
+                      child: Text('Quỹ tự do'),
+                    ),
+                    ...widget.store.goals.where((item) => item.id != null).map(
+                          (item) => DropdownMenuItem<int>(
+                            value: item.id!,
+                            child: Text(item.name, overflow: TextOverflow.ellipsis),
+                          ),
+                        ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setSheetState(() => selectedGoalId = value);
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: note,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Ghi chú',
+                    hintText: 'Ví dụ: tiền cà phê hôm nay',
+                    prefixIcon: Icon(Icons.edit_note_rounded),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: note,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(labelText: 'Ghi chú', prefixIcon: Icon(Icons.notes_rounded)),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  tileColor: Theme.of(sheetContext).colorScheme.surfaceContainerLow,
+                  leading: const Icon(Icons.event_rounded),
+                  title: const Text('Ngày ghi nhận'),
+                  subtitle: Text(
+                    '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}',
                   ),
-                  const SizedBox(height: 12),
-                  ListTile(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                    tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
-                    leading: const Icon(Icons.event_rounded),
-                    title: const Text('Ngày giao dịch'),
-                    subtitle: Text('${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}'),
-                    onTap: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: date,
-                        firstDate: DateTime(2015),
-                        lastDate: DateTime.now().add(const Duration(days: 1)),
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: sheetContext,
+                      initialDate: date,
+                      firstDate: DateTime(2015),
+                      lastDate: DateTime.now(),
+                    );
+                    if (picked != null) setSheetState(() => date = picked);
+                  },
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: () {
+                    final value = double.tryParse(amount.text.replaceAll(',', '.')) ?? 0;
+                    if (value <= 0) {
+                      ScaffoldMessenger.of(sheetContext).showSnackBar(
+                        const SnackBar(content: Text('Nhập số tiền lớn hơn 0.')),
                       );
-                      if (picked != null) setSheetState(() => date = picked);
-                    },
+                      return;
+                    }
+                    Navigator.pop(sheetContext, true);
+                  },
+                  icon: Icon(action == 'saving' ? Icons.savings_rounded : Icons.output_rounded),
+                  label: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Text(action == 'saving' ? 'Bỏ vào hũ' : 'Rút tiền'),
                   ),
-                  const SizedBox(height: 18),
-                  FilledButton.icon(
-                    onPressed: () {
-                      final value = double.tryParse(amount.text.replaceAll(',', '.')) ?? 0;
-                      if (value <= 0) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Nhập số tiền lớn hơn 0.')));
-                        return;
-                      }
-                      Navigator.pop(context, true);
-                    },
-                    icon: const Icon(Icons.check_rounded),
-                    label: const Padding(padding: EdgeInsets.all(14), child: Text('Lưu giao dịch')),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
 
-    if (saved == true) {
+    if (accepted == true) {
       final value = double.tryParse(amount.text.replaceAll(',', '.')) ?? 0;
-      await widget.store.addTransaction(
-        type: type,
-        amount: value,
-        category: category,
-        note: note.text,
-        occurredAt: date,
-      );
+      final goalId = selectedGoalId == -1 ? null : selectedGoalId;
+      if (action == 'saving') {
+        await widget.store.deposit(
+          goalId: goalId,
+          amount: value,
+          note: note.text,
+          occurredAt: date,
+        );
+      } else {
+        final ok = await widget.store.withdraw(
+          goalId: goalId,
+          amount: value,
+          note: note.text,
+          occurredAt: date,
+        );
+        if (!ok && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Số dư trong hũ không đủ cho khoản rút này.')),
+          );
+        }
+      }
     }
+
     amount.dispose();
     note.dispose();
   }
