@@ -184,13 +184,17 @@ jobs:
       - name: Build release APK
         run: flutter build apk --release
 
-      - name: Prepare APK
-        run: cp build/app/outputs/flutter-apk/app-release.apk LightCoin.apk
+      - name: Prepare final APK
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk LightCoin-2.0.0.apk
+          sha256sum LightCoin-2.0.0.apk > LightCoin-2.0.0.sha256
 
-      - name: Upload APK
+      - name: Upload final APK
         uses: actions/upload-artifact@v4
         with:
-          name: LightCoin-APK
-          path: LightCoin.apk
+          name: LightCoin-Final-2.0.0
+          path: |
+            LightCoin-2.0.0.apk
+            LightCoin-2.0.0.sha256
           if-no-files-found: error
           retention-days: 30
