@@ -1,0 +1,90 @@
+name: Build Light Coin APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter stable
+        shell: bash
+        run: |
+          git clone https://github.com/flutter/flutter.git --depth 1 --branch stable "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Create Android project
+        shell: bash
+        run: |
+          cp -R lib "$RUNNER_TEMP/lightcoin_lib"
+          cp pubspec.yaml "$RUNNER_TEMP/pubspec.yaml"
+          cp analysis_options.yaml "$RUNNER_TEMP/analysis_options.yaml"
+          flutter config --no-analytics
+          flutter create . --platforms=android --org com.lightcoin --project-name light_coin
+          rm -rf lib
+          cp -R "$RUNNER_TEMP/lightcoin_lib" lib
+          cp "$RUNNER_TEMP/pubspec.yaml" pubspec.yaml
+          cp "$RUNNER_TEMP/analysis_options.yaml" analysis_options.yaml
+          flutter pub get
+
+      - name: Configure Android notifications
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/build.gradle.kts')
+          s = p.read_text()
+          s = s.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
+          s = s.replace('minSdk = flutter.minSdkVersion', 'minSdk = 24')
+          s = s.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 36')
+          marker = 'compileOptions {'
+          if 'isCoreLibraryDesugaringEnabled = true' not in s:
+              s = s.replace(marker, marker + '\n        isCoreLibraryDesugaringEnabled = true', 1)
+          if 'multiDexEnabled = true' not in s:
+              s = s.replace('defaultConfig {', 'defaultConfig {\n        multiDexEnabled = true', 1)
+          if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' not in s:
+              s += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+          p.write_text(s)
+
+          m = Path('android/app/src/main/AndroidManifest.xml')
+          x = m.read_text()
+          perms = '''    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n'''
+          x = x.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">', '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n' + perms)
+          x = x.replace('android:label="light_coin"', 'android:label="Light Coin"')
+          receivers = '''\n        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n            <intent-filter>\n                <action android:name="android.intent.action.BOOT_COMPLETED"/>\n                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>\n                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>\n                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>\n            </intent-filter>\n        </receiver>\n'''
+          x = x.replace('        <meta-data\n            android:name="flutterEmbedding"\n            android:value="2" />', '        <meta-data\n            android:name="flutterEmbedding"\n            android:value="2" />' + receivers)
+          m.write_text(x)
+          PY
+          cat > android/app/src/main/res/drawable/ic_notification.xml <<'XML'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+            <path android:fillColor="#FFFFFFFF" android:pathData="M12,2A10,10 0,1 0,12 22A10,10 0,0 0,12 2M13,6V11H17L11,18V13H7L13,6Z"/>
+          </vector>
+          XML
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Prepare APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk LightCoin.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LightCoin-APK
+          path: LightCoin.apk
+          if-no-files-found: error
+          retention-days: 30
